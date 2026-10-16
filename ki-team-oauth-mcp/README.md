@@ -79,3 +79,8 @@ baut das Bundle per `wrangler deploy --dry-run` und führt `test/e2e.mjs` aus: k
 OAuth-Ablauf (inkl. Negativtests), alle Tools gegen den **echten** Hauptworker-Code
 (`claude-ki-team/worker.js`) mit einer OpenRouter-Attrappe, Limits und Kostenschutz.
 Es werden keine echten Zugangsdaten verwendet und nichts bereitgestellt.
+
+## Bereitstellungsprotokoll
+
+* 16.10.2026: Workers Builds auf Root-Verzeichnis `ki-team-oauth-mcp` und Branch `main` umgestellt;
+  erster Build des sicheren Servers ersetzt die vorher bereitgestellte Cloudflare-Demo.
