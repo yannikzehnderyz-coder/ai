@@ -1,5 +1,5 @@
 # KI-Team MCP – Prüfbericht
-Commit: 9293f85b67828ff6d3db8fe033486da0835a381b · Ref: ki-team-main-worker-deploy · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38896926666
+Commit: 5eb98bbdb95463ab256609b310993d5bc82c11cb · Ref: 3/merge · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38897034016
 
 | Schritt | Ergebnis |
 |---|---|
@@ -12,7 +12,7 @@ Commit: 9293f85b67828ff6d3db8fe033486da0835a381b · Ref: ki-team-main-worker-dep
 ## install
 ```
 
-added 223 packages in 5s
+added 223 packages in 6s
 ```
 
 ## typecheck
@@ -48,7 +48,7 @@ env.ALLOWED_REVIEW_OWNERS ("yannikzehnderyz-coder")                          Env
 ## build-main
 ```
 
-added 38 packages in 5s
+added 40 packages in 2s
 
  ⛅️ wrangler 4.151.1
 ────────────────────
