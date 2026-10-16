@@ -1,0 +1,119 @@
+# Prüft den privaten KI-Team-MCP-Server vollständig in der Cloud (kein lokaler PC nötig):
+# Abhängigkeiten installieren, TypeScript prüfen, Worker-Bundle bauen (ohne Bereitstellung)
+# und einen End-to-End-Test (OAuth + alle MCP-Tools) gegen lokale Attrappen ausführen.
+# Es werden KEINE Cloudflare-Zugangsdaten verwendet und NICHTS bereitgestellt.
+name: KI-Team MCP prüfen
+
+on:
+  push:
+    branches: ["ki-team-*"]
+    paths: ["ki-team-oauth-mcp/**", ".github/workflows/ki-team-oauth-mcp.yml"]
+  pull_request:
+    paths: ["ki-team-oauth-mcp/**", ".github/workflows/ki-team-oauth-mcp.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ki-team-oauth-mcp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    if: ${{ github.repository == 'yannikzehnderyz-coder/ai' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ki-team-oauth-mcp
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Abhängigkeiten installieren
+        id: install
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi 2>&1 | tee ../ci-install.log
+
+      - name: TypeScript prüfen
+        id: typecheck
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npx tsc --noEmit 2>&1 | tee ../ci-typecheck.log
+
+      - name: Worker-Bundle bauen (dry-run, keine Bereitstellung)
+        id: build
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -o pipefail
+          npx wrangler deploy --dry-run --outdir dist 2>&1 | tee ../ci-build.log
+
+      - name: End-to-End-Test (OAuth + MCP-Tools)
+        id: e2e
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node test/e2e.mjs 2>&1 | tee ../ci-e2e.log
+
+      - name: package-lock.json sichern (nur beim ersten Lauf)
+        if: github.event_name == 'push' && steps.install.outcome == 'success'
+        run: |
+          if [ -n "$(git status --porcelain package-lock.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "chore(ki-team-oauth-mcp): package-lock.json für reproduzierbare Builds"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Prüfbericht veröffentlichen (Branch ci-reports)
+        if: always()
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "# KI-Team MCP – Prüfbericht"
+            echo "Commit: ${GITHUB_SHA} · Ref: ${GITHUB_REF_NAME} · Lauf: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo "| Schritt | Ergebnis |"
+            echo "|---|---|"
+            echo "| Installation | ${{ steps.install.outcome }} |"
+            echo "| TypeScript | ${{ steps.typecheck.outcome }} |"
+            echo "| Bundle (dry-run) | ${{ steps.build.outcome }} |"
+            echo "| End-to-End-Test | ${{ steps.e2e.outcome }} |"
+            for f in install typecheck build e2e; do
+              if [ -f "ci-$f.log" ]; then
+                echo ""; echo "## $f"; echo '```'; tail -c 30000 "ci-$f.log"; echo '```'
+              fi
+            done
+          } > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p /tmp/rep && cp report.md "/tmp/rep/report-${GITHUB_SHA}.md" && cp report.md /tmp/rep/latest.md
+          cd /tmp/rep
+          git init -q -b ci-reports
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add . && git commit -qm "CI-Bericht ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-reports
+
+      - name: Gesamtergebnis
+        if: always()
+        run: |
+          test "${{ steps.install.outcome }}" = success
+          test "${{ steps.typecheck.outcome }}" = success
+          test "${{ steps.build.outcome }}" = success
+          test "${{ steps.e2e.outcome }}" = success

@@ -1,0 +1,60 @@
+// NUR FÜR AUTOMATISIERTE TESTS (wrangler dev lokal). Wird nie bereitgestellt.
+{
+	"name": "ki-team-oauth-mcp-test",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-03-10",
+	"compatibility_flags": ["nodejs_compat"],
+	"workers_dev": true,
+	"preview_urls": false,
+
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["MyMCP", "UsageLimiter"]
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{ "class_name": "MyMCP", "name": "MCP_OBJECT" },
+			{ "class_name": "UsageLimiter", "name": "USAGE_LIMITER" }
+		]
+	},
+
+	// Vorhandener KV-Namespace "ki-team-oauth" (bereits angelegt, nicht duplizieren)
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"id": "328dc2347f26431ab765fb47ddb5adbc"
+		}
+	],
+
+	// Interne Verbindung zum bestehenden Hauptworker – kein öffentlicher HTTP-Aufruf
+	"services": [
+		{
+			"binding": "KI_TEAM",
+			"service": "claude-ki-team"
+		}
+	],
+
+	// Nicht-geheime Konfiguration
+	"vars": {
+		// Nur dieser GitHub-Account (numerische, unveränderliche ID von "yannikzehnderyz-coder") darf sich anmelden
+		"ALLOWED_GITHUB_USER_IDS": "340084289",
+		// Nur Claude (claude.ai / Desktop / Mobile) darf Tokens empfangen
+		"ALLOWED_REDIRECT_URIS": "https://claude.ai/api/mcp/auth_callback",
+		// Harte Obergrenze für KI-Aufrufe über MCP pro UTC-Tag (zusätzlich zum Limit im Hauptworker)
+		"MCP_DAILY_LIMIT": "12",
+		// Schutz vor Bursts (OpenRouter-Free erlaubt nur wenige Anfragen pro Minute)
+		"MCP_PER_MINUTE_LIMIT": "50",
+		// Rolle, die für automatische Delegation und Zusammenfassungen genutzt wird
+		"COORDINATOR_ROLE": "KI-Koordination",
+		// Test-Attrappen statt GitHub und Test-"Secrets" (Dummywerte)
+		"GITHUB_WEB_BASE": "http://127.0.0.1:8790",
+		"GITHUB_API_BASE": "http://127.0.0.1:8790",
+		"GITHUB_CLIENT_ID": "test-client-id",
+		"GITHUB_CLIENT_SECRET": "test-client-secret",
+		"KI_TEAM_PASSWORD": "test-workspace-pw"
+	},
+
+	"dev": { "port": 8788, "ip": "127.0.0.1" }
+}
