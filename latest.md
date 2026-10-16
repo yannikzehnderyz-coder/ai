@@ -1,5 +1,5 @@
 # KI-Team MCP – Prüfbericht
-Commit: 56f1223d8454299dc5ffea1d75bc9375d34e04ee · Ref: 1/merge · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38870990545
+Commit: 1e71e7ec3f177b442438ec4c72e7a25c0838d9b0 · Ref: ki-team-oauth-mcp · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38871425226
 
 | Schritt | Ergebnis |
 |---|---|
