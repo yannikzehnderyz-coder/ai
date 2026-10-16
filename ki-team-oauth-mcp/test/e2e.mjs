@@ -343,6 +343,19 @@ try {
 		fetch(`${UI}/api/chat`, { method: "POST", headers: { "content-type": "application/json", "x-workspace-password": pw }, body: JSON.stringify({ role, task }) });
 	r = await chat("falsch", "x");
 	check("/api/chat mit falschem Passwort → 401", r.status === 401, `(war ${r.status})`);
+	// timingSafeEqual: unterschiedliche Längen dürfen keine Ausnahme (500) auslösen
+	r = await fetch(`${UI}/api/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: "SEO", task: "x" }) });
+	check("Ohne Passwort-Header → 401 (keine Ausnahme)", r.status === 401, `(war ${r.status})`);
+	r = await chat("", "x");
+	check("Leeres Passwort → 401", r.status === 401, `(war ${r.status})`);
+	r = await chat("x".repeat(5000), "x");
+	check("Sehr langes Passwort → 401", r.status === 401, `(war ${r.status})`);
+	r = await chat("test-workspace-pX", "x");
+	check("Gleich langes, falsches Passwort → 401", r.status === 401, `(war ${r.status})`);
+	r = await chat("test-workspace-pw ", "x");
+	check("Passwort mit Zusatzzeichen → 401", r.status === 401, `(war ${r.status})`);
+	r = await chat("ÄÖÜ-ß-😀", "x");
+	check("Sonderzeichen-Passwort → 401", r.status === 401, `(war ${r.status})`);
 	for (const path of ["roles", "usage", "health"]) {
 		r = await fetch(`${UI}/api/mcp/v1/${path}`);
 		check(`/api/mcp/v1/${path} ohne Passwort → 401`, r.status === 401, `(war ${r.status})`);
