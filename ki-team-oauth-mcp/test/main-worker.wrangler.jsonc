@@ -7,7 +7,7 @@
 	"vars": {
 		"APP_PASSWORD": "test-workspace-pw",
 		"OPENROUTER_API_KEY": "test-or-key",
-		"DAILY_REQUEST_LIMIT": "20",
+		"DAILY_REQUEST_LIMIT": "100",
 		"OPENROUTER_BASE": "http://127.0.0.1:8791/api/v1"
 	}
 }

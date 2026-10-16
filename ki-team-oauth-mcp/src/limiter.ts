@@ -13,7 +13,7 @@ import { DurableObject } from "cloudflare:workers";
  * keine Kosten) – der Limiter "fail-closed": Fehler => kein KI-Aufruf.
  */
 
-export type Bucket = "ai" | "register";
+export type Bucket = "ai" | "register" | "cache_hit" | "verify";
 
 export interface ReserveResult {
 	ok: boolean;
@@ -43,6 +43,44 @@ export class UsageLimiter extends DurableObject<Env> {
 		this.ctx.storage.sql.exec(
 			"CREATE TABLE IF NOT EXISTS events (bucket TEXT NOT NULL, ts INTEGER NOT NULL)",
 		);
+		// Ergebnis-Cache: identische Anfragen innerhalb der TTL verbrauchen keinen KI-Aufruf
+		this.ctx.storage.sql.exec(
+			"CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires INTEGER NOT NULL)",
+		);
+	}
+
+	async cacheGet(key: string): Promise<string | null> {
+		const now = Date.now();
+		const row = this.ctx.storage.sql
+			.exec<{ value: string; expires: number }>("SELECT value, expires FROM cache WHERE key = ?", key)
+			.toArray()[0];
+		if (!row || Number(row.expires) < now) return null;
+		const day = utcDay(now);
+		this.ctx.storage.sql.exec(
+			"INSERT INTO daily (bucket, day, used) VALUES ('cache_hit', ?, 1) ON CONFLICT(bucket, day) DO UPDATE SET used = used + 1",
+			day,
+		);
+		return String(row.value);
+	}
+
+	async cachePut(key: string, value: string, ttlMs: number, maxRows = 300): Promise<void> {
+		const now = Date.now();
+		this.ctx.storage.sql.exec("DELETE FROM cache WHERE expires < ?", now);
+		this.ctx.storage.sql.exec(
+			"INSERT INTO cache (key, value, expires) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, expires = excluded.expires",
+			key,
+			value.slice(0, 60_000),
+			now + ttlMs,
+		);
+		// Nur zwischengespeicherte KI-Antworten (keine Nutzerdaten) – älteste zuerst verdrängen
+		this.ctx.storage.sql.exec(
+			"DELETE FROM cache WHERE key IN (SELECT key FROM cache ORDER BY expires ASC LIMIT MAX(0, (SELECT COUNT(*) FROM cache) - ?))",
+			maxRows,
+		);
+	}
+
+	async counter(bucket: Bucket): Promise<number> {
+		return this.usedToday(bucket, utcDay(Date.now()));
 	}
 
 	private usedToday(bucket: Bucket, day: string): number {

@@ -4,6 +4,7 @@ declare namespace Cloudflare {
 		OAUTH_KV: KVNamespace;
 		MCP_OBJECT: DurableObjectNamespace<import("./index").MyMCP>;
 		USAGE_LIMITER: DurableObjectNamespace<import("./limiter").UsageLimiter>;
+		PROJECT_STORE: DurableObjectNamespace<import("./projects").ProjectStore>;
 		KI_TEAM: Fetcher;
 
 		// Secrets
@@ -17,6 +18,10 @@ declare namespace Cloudflare {
 		MCP_DAILY_LIMIT: string;
 		MCP_PER_MINUTE_LIMIT: string;
 		COORDINATOR_ROLE: string;
+		QUALITY_RESERVE?: string;
+		CACHE_TTL_MINUTES?: string;
+		VERIFY_ROLE?: string;
+		ALLOWED_REVIEW_OWNERS?: string;
 
 		// Nur für automatisierte Tests (lokale Attrappe statt github.com). In Produktion nicht gesetzt.
 		GITHUB_WEB_BASE?: string;

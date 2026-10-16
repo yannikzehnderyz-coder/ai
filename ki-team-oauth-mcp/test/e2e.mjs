@@ -41,6 +41,12 @@ const gh = createServer(async (req, res) => {
 		res.statusCode = 401;
 		return res.end("{}");
 	}
+	if (url.pathname === "/repos/yannikzehnderyz-coder/demo/pulls/7/files") {
+		return res.end(JSON.stringify([
+			{ filename: "src/db.ts", status: "modified", patch: "@@ -1,2 +1,3 @@\n const db = open();\n+const q = `SELECT * FROM users WHERE id = ${id}`;\n+el.innerHTML = userInput;" },
+			{ filename: "README.md", status: "modified", patch: "@@ -1 +1 @@\n-alt\n+neu" },
+		]));
+	}
 	res.statusCode = 404;
 	res.end("{}");
 });
@@ -49,6 +55,8 @@ await new Promise((r) => gh.listen(8790, "127.0.0.1", r));
 // ---------- OpenRouter-Attrappe ----------
 const FREE_A = "mock/a:free";
 const FREE_B = "mock/b:free";
+const FREE_CODER = "mock/qwen-coder:free";
+const FREE_R1 = "mock/deepseek-r1:free";
 const modelCalls = [];
 const orServer = createServer(async (req, res) => {
 	let body = "";
@@ -60,6 +68,10 @@ const orServer = createServer(async (req, res) => {
 			{ id: "trap/fake:free", pricing: { prompt: "0", completion: "0.000001" } },
 			{ id: FREE_A, pricing: { prompt: "0", completion: "0", request: "0" } },
 			{ id: FREE_B, pricing: { prompt: "0", completion: "0" } },
+			{ id: "trap/super-coder:free", pricing: { prompt: "0", completion: "0", request: "0.01" } },
+			{ id: "paid/qwen-coder-pro", pricing: { prompt: "0.002", completion: "0.002" } },
+			{ id: FREE_CODER, context_length: 32000, pricing: { prompt: "0", completion: "0" } },
+			{ id: FREE_R1, context_length: 64000, pricing: { prompt: "0", completion: "0" } },
 		] }));
 	}
 	if (req.url === "/api/v1/chat/completions") {
@@ -70,9 +82,15 @@ const orServer = createServer(async (req, res) => {
 		const user = b.messages?.[1]?.content ?? "";
 		const down = (user.includes("MODEL_DOWN") && b.model === FREE_A) || (role === "SEO" && user.includes("FAIL_ROLE"));
 		if (down) { res.statusCode = 503; return res.end(JSON.stringify({ error: { message: "Provider down" } })); }
-		let content = `MOCK-ANTWORT von ${role}: ${user.split("\n---\nKontext:")[0].slice(0, 40)}${user.includes("Kontext:") ? " [mit Kontext]" : ""}`;
+		let content = `MOCK-ANTWORT von ${role}: ${user.split("\n---\nKontext:")[0].slice(0, 40)}${user.includes("Kontext:") ? " [mit Kontext]" : ""}${user.includes("Projektkontext") ? " [Projektkontext]" : ""}${user.includes("Farben: Grün/Weiß") ? " [Entscheidung bekannt]" : ""}`;
+		let finish = "stop";
 		if (role === "KI-Koordination" && user.includes("AUSSCHLIESSLICH mit JSON")) content = 'Hier: {"roles":["Marketing","SEO","gibtsnicht"],"reason":"Marketingthema"}';
-		return res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+		if (user.split("\n---\nKontext:")[0].includes("TRUNCATE") && role !== "Kritische Prüfung") {
+			content = "Hier die Schritte:\n1. Ziel klären\n2. Aufgaben sammeln\n3. Zeitplan\n4. Budget\n5. Start und dann weiter mit";
+			finish = "length";
+		}
+		if (role === "Kritische Prüfung") content = "1. Die Antwort ist unvollständig und nennt zu viele Schritte.";
+		return res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: finish }] }));
 	}
 	res.statusCode = 404; res.end("{}");
 });
@@ -290,47 +308,141 @@ try {
 
 	const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } });
 	check("MCP initialize", init.status === 200 && !!init.msg?.result?.serverInfo, `(${init.status} ${init.text?.slice(0, 300)})`);
+	check("Server-Version 3.0.0", init.msg?.result?.serverInfo?.version === "3.0.0", JSON.stringify(init.msg?.result?.serverInfo));
 	await rpc("notifications/initialized", {}, true);
 	const list = await rpc("tools/list", {});
 	const names = (list.msg?.result?.tools ?? []).map((t) => t.name).sort();
-	const expected = ["ki_team_auto_delegate", "ki_team_collaborate", "ki_team_list_roles", "ki_team_run_role", "ki_team_status", "ki_team_usage"];
-	check("Alle 6 Tools vorhanden", JSON.stringify(names) === JSON.stringify(expected), JSON.stringify(names));
+	const legacy = ["ki_team_auto_delegate", "ki_team_collaborate", "ki_team_list_roles", "ki_team_run_role", "ki_team_status", "ki_team_usage"];
+	const added = ["ki_team_pipeline", "ki_team_project_get", "ki_team_project_list", "ki_team_project_save", "ki_team_quality_check", "ki_team_review_code"];
+	check("Alle 6 bisherigen Tools weiterhin vorhanden", legacy.every((n) => names.includes(n)), JSON.stringify(names));
+	check("6 neue Tools vorhanden (12 gesamt)", added.every((n) => names.includes(n)) && names.length === 12, JSON.stringify(names));
 	check("Demo-Tool 'add' entfernt", !names.includes("add"));
 
+	const LIMIT = 40;
+	let remaining = LIMIT;
+	const rem = () => `${remaining}/${LIMIT}`;
+
 	let t = await callTool("ki_team_status");
-	check("ki_team_status", !t.isError && t.text.includes("erreichbar: ja") && t.text.includes("26 Rollen"), t.text);
+	check("ki_team_status", !t.isError && t.text.includes("erreichbar: ja") && t.text.includes("26 Rollen") && t.text.includes("MCP-Server 3.0.0"), t.text);
+	check("Status zeigt nur kostenlose Modelle (4) und Routing", t.text.includes("Kostenlose Modelle: 4") && /code 1/.test(t.text) && /reasoning 1/.test(t.text), t.text);
 	t = await callTool("ki_team_list_roles");
 	check("ki_team_list_roles liefert 26 Rollen", !t.isError && t.text.startsWith("26 Rollen") && t.text.includes("KI-Koordination"), t.text.slice(0, 200));
 
+	console.log("8a) Einzelauftrag, Cache, Qualitätsprüfung");
 	t = await callTool("ki_team_run_role", { role: "marketing", task: "Strategie für Gartencenter" });
-	check("ki_team_run_role erreicht Hauptworker + OpenRouter", !t.isError && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes(FREE_A) && t.text.includes("11/12"), t.text);
+	remaining--;
+	check("ki_team_run_role erreicht Hauptworker + OpenRouter", !t.isError && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes(FREE_A) && t.text.includes(rem()), t.text);
+	check("Automatische Qualitätsprüfung ohne Befund", t.text.includes("Qualitätsprüfung: ✅"), t.text);
+	t = await callTool("ki_team_run_role", { role: "marketing", task: "Strategie für Gartencenter" });
+	check("Identische Anfrage kommt aus dem Cache (0 Aufrufe)", !t.isError && t.text.includes("aus Cache") && t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_run_role", { role: "marketing", task: "Strategie für Gartencenter", fresh: true });
+	remaining--;
+	check("fresh=true umgeht den Cache", !t.isError && !t.text.includes("aus Cache") && t.text.includes(rem()), t.text);
 	t = await callTool("ki_team_run_role", { role: "Gibt es nicht", task: "x" });
 	check("Unbekannte Rolle → Fehler ohne Verbrauch", t.isError && t.text.includes("nicht gefunden"), t.text);
 
+	console.log("8b) Delegation und Zusammenarbeit (bestehende Funktionen)");
 	t = await callTool("ki_team_auto_delegate", { task: "Wie bewerbe ich meinen Shop?" });
-	check("ki_team_auto_delegate wählt Rolle und führt aus", !t.isError && t.text.includes("Vorgeschlagene Rollen: Marketing, SEO") && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes("9/12"), t.text);
+	remaining -= 2;
+	check("ki_team_auto_delegate wählt Rolle und führt aus", !t.isError && t.text.includes("Vorgeschlagene Rollen: Marketing, SEO") && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes(rem()), t.text);
 
 	t = await callTool("ki_team_collaborate", { task: "Login-System bauen", roles: ["Programmierung", "Sicherheit"] });
-	check("ki_team_collaborate parallel + Zusammenfassung", !t.isError && t.text.includes("MOCK-ANTWORT von Programmierung") && t.text.includes("MOCK-ANTWORT von Sicherheit") && t.text.includes("Zusammenfassung (KI-Koordination)") && t.text.includes("6/12"), t.text);
+	remaining -= 3;
+	check("ki_team_collaborate parallel + Zusammenfassung", !t.isError && t.text.includes("MOCK-ANTWORT von Programmierung") && t.text.includes("MOCK-ANTWORT von Sicherheit") && t.text.includes("Zusammenfassung (KI-Koordination)") && t.text.includes(rem()), t.text);
+	check("Modell-Routing: Programmierung → Code-Modell", t.text.includes(`Modell: ${FREE_CODER} · Profil: code`), t.text);
+	check("Modell-Routing: Sicherheit → Reasoning-Modell", t.text.includes(`Modell: ${FREE_R1} · Profil: reasoning`), t.text);
 
 	t = await callTool("ki_team_collaborate", { task: "FAIL_ROLE Kampagne", roles: ["Marketing", "SEO"], mode: "sequential" });
-	check("ki_team_collaborate sequenziell, Teilfehler wird gemeldet", !t.isError && t.text.includes("model_unavailable") && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes("[mit Kontext]") && t.text.includes("3/12"), t.text);
+	remaining -= 3;
+	check("ki_team_collaborate sequenziell, Teilfehler wird gemeldet", !t.isError && t.text.includes("model_unavailable") && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes("[mit Kontext]") && t.text.includes(rem()), t.text);
 
-	t = await callTool("ki_team_collaborate", { task: "zu teuer", roles: ["Marketing", "SEO", "Recherche"] });
-	check("Collaborate wird vorab abgelehnt, wenn Budget nicht reicht", t.isError && t.text.includes("Tageslimit erreicht"), t.text);
+	console.log("8c) Datenschutz vor Weitergabe an externe Modelle");
+	t = await callTool("ki_team_run_role", { role: "E-Mails", task: "Mein Passwort: Geheim12345 – schreib eine Mail" });
+	check("Zugangsdaten werden blockiert (0 Aufrufe)", t.isError && t.text.includes("Zugangsdaten") && !t.text.includes("Geheim12345") && t.text.includes("nie"), t.text);
+	t = await callTool("ki_team_run_role", { role: "E-Mails", task: "Schreibe eine Antwort an max.mustermann@firma.de" });
+	check("Personenbezogene Daten → Rückfrage (0 Aufrufe)", t.isError && t.text.includes("Rückfrage nötig") && t.text.includes("E-Mail-Adresse"), t.text);
+	t = await callTool("ki_team_run_role", { role: "E-Mails", task: "Schreibe eine Antwort an max.mustermann@firma.de", allow_personal_data: true });
+	remaining--;
+	check("Mit Zustimmung wird ausgeführt", !t.isError && t.text.includes("MOCK-ANTWORT von E-Mails") && t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_run_role", { role: "E-Mails", task: "Token ghp_" + "a".repeat(36), allow_personal_data: true });
+	check("Zugangsdaten auch mit Zustimmung blockiert", t.isError && t.text.includes("GitHub-Token"), t.text);
+
+	console.log("8d) Qualitätsprüfung + gezielte Nachprüfung");
+	t = await callTool("ki_team_run_role", { role: "Projektplanung", task: "Nenne drei Schritte TRUNCATE" });
+	remaining -= 2;
+	check("Abgeschnittene Antwort wird erkannt", t.text.includes("abgeschnitten") && t.text.includes("Es wurden 3 Punkte verlangt, die Antwort enthält 5"), t.text);
+	check("Automatische Nachprüfung bei gravierendem Befund (+1 Aufruf)", t.text.includes("Nachprüfung (Kritische Prüfung)") && t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_run_role", { role: "Projektplanung", task: "Nenne vier Schritte TRUNCATE", verify: "never" });
+	remaining--;
+	check("verify=never → keine Nachprüfung", !t.text.includes("Nachprüfung (") && t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_quality_check", { task: "Nenne drei Ideen", text: "1. A ist gut\n2. B ist gut\n3. C ist gut\n4. D ist gut\n5. E ist gut" });
+	check("ki_team_quality_check ohne KI-Aufruf", !t.isError && t.text.includes("3 Punkte verlangt") && t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_quality_check", { task: "Nenne drei Ideen", text: "I'm sorry, but I cannot help with that." });
+	check("Verweigerung wird erkannt", t.text.includes("verweigert") && t.text.includes(rem()), t.text);
+
+	console.log("8e) Projektgedächtnis");
+	t = await callTool("ki_team_project_save", { project: "Gartencenter Relaunch", goal: "Neue Website bis Mai", decision: "Farben: Grün/Weiß", status: "Konzeptphase" });
+	check("Projekt anlegen + Entscheidung speichern", !t.isError && t.text.includes("angelegt") && t.text.includes("entscheidung gespeichert"), t.text);
+	t = await callTool("ki_team_project_save", { project: "gartencenter-relaunch", note: "API_KEY = 'sk-or-v1-" + "ab12".repeat(12) + "'" });
+	check("Geheimnisse werden nicht gespeichert", t.isError && t.text.includes("Zugangsdaten"), t.text);
+	t = await callTool("ki_team_project_save", { project: "Anderes Projekt", goal: "Etwas ganz anderes" });
+	check("Zweites Projekt angelegt", !t.isError && t.text.includes("anderes-projekt"), t.text);
+	t = await callTool("ki_team_project_list");
+	check("Projektliste", t.text.includes("2 Projekt(e)") && t.text.includes("gartencenter-relaunch") && t.text.includes("anderes-projekt"), t.text);
+	t = await callTool("ki_team_run_role", { role: "Marketing", task: "Slogan entwerfen", project: "gartencenter-relaunch" });
+	remaining--;
+	check("Projektkontext (Ziel + Entscheidung) wird mitgegeben", !t.isError && t.text.includes("[Projektkontext]") && t.text.includes("[Entscheidung bekannt]") && t.text.includes("protokolliert"), t.text);
+	t = await callTool("ki_team_run_role", { role: "Marketing", task: "Slogan entwerfen", project: "anderes-projekt" });
+	remaining--;
+	check("Strikte Trennung: anderes Projekt kennt die Entscheidung nicht", !t.isError && t.text.includes("[Projektkontext]") && !t.text.includes("[Entscheidung bekannt]"), t.text);
+	t = await callTool("ki_team_project_get", { project: "gartencenter-relaunch" });
+	check("Projekt abrufen: Ziel, Entscheidung, Arbeitsstand", t.text.includes("Neue Website bis Mai") && t.text.includes("[entscheidung] Farben: Grün/Weiß") && t.text.includes("[ergebnis] Marketing") && !t.text.includes("sk-or-v1"), t.text);
+	t = await callTool("ki_team_project_get", { project: "gibt-es-nicht" });
+	check("Unbekanntes Projekt → Fehler", t.isError, t.text);
+	t = await callTool("ki_team_run_role", { role: "Marketing", task: "x", project: "gibt-es-nicht" });
+	check("Unbekanntes Projekt beim Auftrag → Fehler ohne Verbrauch", t.isError && t.text.includes("existiert nicht"), t.text);
+
+	console.log("8f) Mehrstufige Teamarbeit");
+	t = await callTool("ki_team_pipeline", { task: "Baue einen Newsletter-Anmelder", steps: [{ role: "Recherche" }, { role: "Programmierung", instruction: "Implementiere" }, { role: "Codeprüfung" }], estimate_only: true });
+	check("Kostenschätzung ohne Ausführung", t.text.includes("Kontingentbedarf: 3") && t.text.includes("0 KI-Aufrufe"), t.text);
+	t = await callTool("ki_team_pipeline", { task: "Baue einen Newsletter-Anmelder", steps: [{ role: "Recherche" }, { role: "Programmierung", instruction: "Implementiere" }, { role: "Codeprüfung" }] });
+	remaining -= 3;
+	check("Pipeline: 3 Schritte nacheinander mit Übergabe", !t.isError && t.text.includes("Schritt 1: Recherche") && t.text.includes("Schritt 3: Codeprüfung") && /Schritt 2: Programmierung[^#]*\[mit Kontext\]/.test(t.text) && t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_pipeline", { task: "Plane TRUNCATE", steps: [{ role: "Projektplanung" }, { role: "Programmierung" }, { role: "Tests" }], verify: "never" });
+	remaining -= 1;
+	check("Pipeline hält bei gravierendem Problem an und gibt Budget zurück", t.text.includes("angehalten") && !t.text.includes("Schritt 2:") && t.text.includes(rem()), t.text);
+
+	console.log("8g) Code- und Projektprüfung (nur lesend)");
+	t = await callTool("ki_team_review_code", { code: "function run(x) {\n  return eval(x);\n}\ndocument.body.innerHTML = x;" });
+	remaining -= 2;
+	check("Statische Prüfung findet eval + XSS", t.text.includes("Dynamische Codeausführung") && t.text.includes("XSS"), t.text);
+	check("KI-Prüfung durch Codeprüfung + Sicherheit mit Code-Profil", t.text.includes("MOCK-ANTWORT von Codeprüfung") && t.text.includes("MOCK-ANTWORT von Sicherheit") && t.text.includes("Profil: code") && t.text.includes(rem()), t.text);
+	check("Nur lesend", t.text.includes("Nur lesend"), t.text);
+	t = await callTool("ki_team_review_code", { code: "const token = 'ghp_" + "b".repeat(36) + "';" });
+	check("Code mit Zugangsdaten: statische Prüfung ja, KI-Prüfung nein", t.text.includes("KI-Prüfung nicht durchgeführt") && !t.text.includes("ghp_bbbb") && t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_review_code", { repo: "yannikzehnderyz-coder/demo", pr: 7, ai_review: false });
+	check("PR von GitHub laden: SQL-Injection + XSS + fehlende Tests", t.text.includes("SQL-Injection") && t.text.includes("src/db.ts") && t.text.includes("keine Testdateien") && t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_review_code", { repo: "fremder/repo", pr: 1 });
+	check("Nicht freigegebener Besitzer wird abgelehnt", t.isError && t.text.includes("nicht freigegeben"), t.text);
 
 	t = await callTool("ki_team_usage");
-	check("ki_team_usage zeigt beide Limits", !t.isError && t.text.includes("3/12") && /Hauptworker-Limit: \d+\/20 genutzt/.test(t.text), t.text);
+	check("ki_team_usage zeigt beide Limits, Cache und Nachprüfungen", !t.isError && t.text.includes(rem()) && /Hauptworker-Limit: \d+\/100 genutzt/.test(t.text) && /Cache beantwortet \(0 Aufrufe\): [1-9]/.test(t.text) && t.text.includes("Nachprüfungen: 1"), t.text);
 
 	console.log("9) Atomares Limit bei parallelen Aufrufen");
-	const par = await Promise.all(Array.from({ length: 6 }, (_, i) => callTool("ki_team_run_role", { role: "Recherche", task: `parallel ${i}` })));
+	const n = remaining + 3;
+	const par = await Promise.all(Array.from({ length: n }, (_, i) => callTool("ki_team_run_role", { role: "Recherche", task: `parallel ${i}` })));
 	const okCount = par.filter((x) => !x.isError).length;
-	check("Genau 3 von 6 parallelen Aufrufen erlaubt (Restbudget 3)", okCount === 3, `(erlaubt: ${okCount})`);
+	check(`Genau ${remaining} von ${n} parallelen Aufrufen erlaubt`, okCount === remaining, `(erlaubt: ${okCount})`);
+	remaining = 0;
 	t = await callTool("ki_team_run_role", { role: "Recherche", task: "danach" });
 	check("Nach Erreichen des Limits → abgelehnt", t.isError && t.text.includes("Tageslimit"), t.text);
+	t = await callTool("ki_team_collaborate", { task: "zu teuer", roles: ["Marketing", "SEO", "Recherche"] });
+	check("Collaborate wird vorab abgelehnt, wenn Budget nicht reicht", t.isError && t.text.includes("Tageslimit erreicht"), t.text);
+	t = await callTool("ki_team_run_role", { role: "marketing", task: "Strategie für Gartencenter" });
+	check("Cache funktioniert auch bei ausgeschöpftem Limit", !t.isError && t.text.includes("aus Cache"), t.text);
 
 	console.log("10) Keine Secrets in Antworten");
-	check("Keine Secrets in MCP-Ausgaben", !SECRETS.some((s) => allOutput.includes(s)));
+	check("Keine Secrets in MCP-Ausgaben", !SECRETS.some((s) => allOutput.includes(s)) && !allOutput.includes("Geheim12345") && !allOutput.includes("ghp_aaaa"));
 
 	console.log("11) Hauptworker direkt (Weboberfläche + Schutz der internen API)");
 	await stopWrangler();
@@ -380,8 +492,8 @@ try {
 	check("Nutzung wird korrekt gemeldet", d.used === 3 && d.limit === 3 && d.remaining === 0, JSON.stringify(d));
 
 	console.log("12) Kostenschutz");
-	check("Nur :free-Modelle wurden aufgerufen", modelCalls.length > 0 && modelCalls.every((m) => m === FREE_A || m === FREE_B), JSON.stringify(modelCalls));
-	check("Kostenpflichtiges / falsch markiertes Modell nie benutzt", !modelCalls.includes("paid/expensive") && !modelCalls.includes("trap/fake:free"));
+	check("Nur :free-Modelle mit Preis 0 wurden aufgerufen", modelCalls.length > 0 && modelCalls.every((m) => [FREE_A, FREE_B, FREE_CODER, FREE_R1].includes(m)), JSON.stringify([...new Set(modelCalls)]));
+	check("Kostenpflichtige / falsch markierte Modelle nie benutzt (auch nicht beim Routing)", !["paid/expensive", "trap/fake:free", "trap/super-coder:free", "paid/qwen-coder-pro"].some((m) => modelCalls.includes(m)));
 
 	await finish(failures.length ? 1 : 0);
 } catch (e) {
