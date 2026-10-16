@@ -39,16 +39,36 @@ pnpm-Workspace-Pfade des Monorepos). Die Vorlage `demos/remote-mcp-server` bleib
 * Das Limit des Hauptworkers bleibt zusätzlich bestehen.
 * Bei Überschreitung der Cloudflare-Free-Grenzen schlagen Aufrufe fehl – es entstehen keine Kosten.
 
-## MCP-Tools
+## MCP-Tools (v3)
 
 | Tool | KI-Aufrufe |
 |---|---|
-| `ki_team_status` | 0 |
+| `ki_team_status` (inkl. kostenlose Modelle und Routing) | 0 |
 | `ki_team_list_roles` (live aus dem Hauptworker) | 0 |
-| `ki_team_run_role` (Rolle per ID oder Name) | 1 |
+| `ki_team_run_role` (Rolle per ID oder Name) | 1 (0 bei Cache-Treffer) |
 | `ki_team_auto_delegate` (Auswahl durch „KI-Koordination“, optional Ausführung) | 1–2 |
 | `ki_team_collaborate` (2–4 Rollen, parallel oder sequenziell, optional Zusammenfassung) | 2–5 |
-| `ki_team_usage` | 0 |
+| `ki_team_usage` (inkl. Cache-Ersparnis und Nachprüfungen) | 0 |
+| `ki_team_pipeline` – mehrstufige Teamarbeit mit geprüfter Übergabe, stoppt bei gravierenden Problemen | 2–5 |
+| `ki_team_quality_check` – Qualitätsprüfung eines Textes; `deep=true` mit Nachprüfung | 0 (1) |
+| `ki_team_project_list` / `_get` / `_save` – Projektgedächtnis | 0 |
+| `ki_team_review_code` – statische + KI-Prüfung von Code, PRs oder Dateien (nur lesend) | 0–3 |
+
+### Neu in v3
+
+* **Qualitätsprüfung ohne KI-Aufruf:** leere/abgeschnittene Antworten, Verweigerung, falsche Sprache,
+  falsche Anzahl, Platzhalter, Wiederholungen, offene Codeblöcke, gegensätzliche Empfehlungen im Team.
+  Gezielte Nachprüfung durch „Kritische Prüfung“ nur bei gravierenden Befunden (`verify=auto`)
+  und nur, wenn mehr als `QUALITY_RESERVE` Aufrufe frei sind.
+* **Projektgedächtnis:** SQLite-Durable-Object pro GitHub-Konto, Projekte strikt getrennt,
+  nichts wird gelöscht (nur archiviert), Zugangsdaten werden abgewiesen.
+* **Modell-Routing** (Hauptworker v3): Profile `code`, `reasoning`, `writing`, `fast`, `long`
+  nach Rolle oder explizit; ausschließlich `:free`-Modelle mit Preis 0, Fallback auf weitere Free-Modelle.
+* **Kontingentmanager:** Cache für identische Anfragen (0 Aufrufe), Vorab-Reservierung mit Rückgabe,
+  `estimate_only` zur Kostenschätzung, bestehende Tages- und Minutenlimits unverändert.
+* **Datenschutz:** Zugangsdaten werden nie an externe Modelle gegeben; personenbezogene Daten
+  (E-Mail, Telefon, IBAN, Kartennummer) nur mit `allow_personal_data=true` nach Zustimmung.
+* **Code-Prüfung:** nur lesend; GitHub-Quellen nur von `ALLOWED_REVIEW_OWNERS`, ohne Token.
 
 ## Interne API, die der Hauptworker bereitstellen muss (v1)
 
@@ -58,8 +78,9 @@ Alle Anfragen kommen über das Service-Binding und tragen `x-workspace-password`
 |---|---|
 | `GET /api/mcp/v1/health` | `{ "ok": true, "roles": 26, "version": "…" }` |
 | `GET /api/mcp/v1/roles` | `{ "roles": [{ "id", "name", "description" }] }` |
-| `POST /api/mcp/v1/run` `{ roleId, task, context? }` | `{ roleId, roleName, output, model, usage? }` |
+| `POST /api/mcp/v1/run` `{ roleId, task, context?, profile? }` | `{ roleId, roleName, output, model, profile?, finishReason?, usage? }` |
 | `GET /api/mcp/v1/usage` | `{ used, limit, remaining, resetsAt? }` |
+| `GET /api/mcp/v1/models` (ab v3) | `{ free, profiles: { code: [...], ... }, version }` |
 | Fehler | HTTP 4xx/5xx + `{ "error": { "code", "message" } }` (429 bei Limit) |
 
 ## Cloudflare-Einstellungen (Workers Builds)

@@ -32,7 +32,19 @@ export interface RunResult {
 	roleName?: string;
 	output: string;
 	model?: string;
+	profile?: string;
+	finishReason?: string;
 	usage?: BackendUsage;
+	cached?: boolean;
+}
+
+export type ModelProfile = "auto" | "code" | "reasoning" | "writing" | "fast" | "long";
+export const MODEL_PROFILES: ModelProfile[] = ["auto", "code", "reasoning", "writing", "fast", "long"];
+
+export interface ModelInfo {
+	free: number;
+	profiles?: Record<string, string[]>;
+	version?: string;
 }
 
 export class BackendError extends Error {
@@ -127,10 +139,10 @@ export class KiTeamBackend {
 			.map((r) => ({ id: r.id, name: r.name, description: typeof r.description === "string" ? r.description : undefined }));
 	}
 
-	async run(roleId: string, task: string, context?: string): Promise<RunResult> {
+	async run(roleId: string, task: string, context?: string, profile?: ModelProfile): Promise<RunResult> {
 		const data = await this.call<RunResult>("/run", {
 			method: "POST",
-			body: JSON.stringify({ roleId, task, context: context || undefined }),
+			body: JSON.stringify({ roleId, task, context: context || undefined, profile: profile && profile !== "auto" ? profile : undefined }),
 			timeoutMs: RUN_TIMEOUT_MS,
 		});
 		if (typeof data.output !== "string") {
@@ -141,6 +153,11 @@ export class KiTeamBackend {
 
 	usage() {
 		return this.call<BackendUsage>("/usage");
+	}
+
+	/** Free-Modelle und Routing-Profile (ab Hauptworker v3; ältere Versionen -> 404). */
+	models() {
+		return this.call<ModelInfo>("/models");
 	}
 }
 

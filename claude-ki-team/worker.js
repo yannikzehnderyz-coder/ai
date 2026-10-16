@@ -1,5 +1,5 @@
 // =====================================================================
-// Hauptworker "claude-ki-team" – Version 2
+// Hauptworker "claude-ki-team" – Version 3
 // Komplett ins Cloudflare-Dashboard ("Code bearbeiten") einfügen.
 //
 // Unverändert: Weboberfläche, POST /api/chat, Passwort (APP_PASSWORD),
@@ -8,6 +8,10 @@
 //              strengere Free-Modell-Prüfung, Fallback auf ein 2. Free-Modell,
 //              Fehler von OpenRouter werden als Fehler gemeldet (nicht als Antwort),
 //              zeitkonstanter Passwortvergleich, Modellliste wird 1 h zwischengespeichert.
+// Neu in v3:   Modell-Routing nach Aufgabenprofil (code / reasoning / writing / fast / long),
+//              weiterhin AUSSCHLIESSLICH ":free"-Modelle mit Preis 0; Fallback auf andere Free-Modelle,
+//              kurzzeitiges Überspringen gerade ausgefallener Modelle, finish_reason in der Antwort,
+//              Endpunkt /api/mcp/v1/models (zeigt nur kostenlose Modelle, kein KI-Aufruf).
 //
 // Secrets/Variablen (bestehend): OPENROUTER_API_KEY, APP_PASSWORD, DAILY_REQUEST_LIMIT, LIMITS_KV
 // Optional: MAX_TOKENS (Standard 1000), PREFERRED_MODELS (kommagetrennte :free-Modell-IDs)
@@ -15,10 +19,27 @@
 
 const rollen = ["Projektplanung","Recherche","Programmierung","Fehlersuche","Codeprüfung","Tests","Dokumentation","Übersetzung","Zusammenfassung","Ideenfindung","Mathematik","Datenanalyse","Sicherheit","UX-Design","UI-Texte","Produktstrategie","Marketing","SEO","E-Mails","Rechtliche Informationen","Finanzinformationen","Lernhilfe","Prompt-Optimierung","Qualitätskontrolle","Kritische Prüfung","KI-Koordination"];
 
-const VERSION = "2.0.0";
+const VERSION = "3.0.0";
 const MAX_MODEL_ATTEMPTS = 2; // höchstens 2 Free-Modelle pro Anfrage probieren
 const MODEL_CACHE_MS = 60 * 60 * 1000;
-let modelCache = { at: 0, ids: [] };
+const FAILURE_SKIP_MS = 10 * 60 * 1000; // ausgefallene Modelle 10 min hinten anstellen
+let modelCache = { at: 0, models: [] };
+const recentFailures = new Map(); // model id -> Zeitpunkt des letzten Fehlers (pro Isolate)
+
+// ---- Modell-Routing: welches Profil passt zu welcher Rolle ----
+const PROFILES = ["code", "reasoning", "writing", "fast", "long"];
+const ROLE_PROFILE = {
+  "Programmierung": "code", "Fehlersuche": "code", "Codeprüfung": "code", "Tests": "code",
+  "Mathematik": "reasoning", "Datenanalyse": "reasoning", "Kritische Prüfung": "reasoning",
+  "Qualitätskontrolle": "reasoning", "Sicherheit": "reasoning", "Finanzinformationen": "reasoning",
+  "Rechtliche Informationen": "reasoning",
+};
+const PROFILE_MATCH = {
+  code: /coder|codestral|devstral|starcoder|codellama|code-/i,
+  reasoning: /(^|[/:-])r1([:-]|$)|reason|think|qwq|magistral|deepseek-r/i,
+  writing: /llama|mistral|gemma|qwen|hermes|nemo|glm|kimi|command|gpt-oss/i,
+  fast: /(^|[-_/ ])(1b|1\.5b|2b|3b|4b|7b|8b|9b|mini|small|nano|flash|lite)([-_: ]|$)/i,
+};
 
 class AppError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -77,24 +98,59 @@ function isFree(m) {
 }
 
 async function freeModels(env) {
-  if (Date.now() - modelCache.at < MODEL_CACHE_MS && modelCache.ids.length) return modelCache.ids;
+  if (Date.now() - modelCache.at < MODEL_CACHE_MS && modelCache.models.length) return modelCache.models;
   let data;
   try {
     data = await fetch(orBase(env) + "/models").then((r) => r.json());
   } catch {
     throw new AppError(502, "models_unavailable", "Modellliste von OpenRouter nicht abrufbar.");
   }
-  let ids = (data.data || []).filter(isFree).map((m) => m.id);
-  const preferred = String(env.PREFERRED_MODELS || "").split(",").map((s) => s.trim()).filter((s) => ids.includes(s));
-  ids = [...preferred, ...ids.filter((id) => !preferred.includes(id))];
-  if (!ids.length) throw new AppError(503, "no_free_model", "Kein kostenloses Modell verfügbar.");
-  modelCache = { at: Date.now(), ids };
-  return ids;
+  let models = (data.data || []).filter(isFree).map((m) => ({ id: m.id, ctx: Number(m.context_length) || 0 }));
+  const preferred = String(env.PREFERRED_MODELS || "").split(",").map((s) => s.trim());
+  models = [
+    ...preferred.map((id) => models.find((m) => m.id === id)).filter(Boolean),
+    ...models.filter((m) => !preferred.includes(m.id)),
+  ];
+  if (!models.length) throw new AppError(503, "no_free_model", "Kein kostenloses Modell verfügbar.");
+  modelCache = { at: Date.now(), models };
+  return models;
 }
 
-async function runRole(env, role, task, context) {
-  const models = await freeModels(env);
+// Reihenfolge der Kandidaten für ein Profil: passende Modelle zuerst, dann alle übrigen Free-Modelle.
+// Gerade ausgefallene Modelle wandern ans Ende. Es kommen nie andere als freie Modelle in Frage.
+function primaryFor(list, profile) {
+  if (profile === "long") return [...list].sort((a, b) => b.ctx - a.ctx).slice(0, 3);
+  if (profile === "writing") {
+    return list.filter((m) => PROFILE_MATCH.writing.test(m.id) && !PROFILE_MATCH.code.test(m.id) && !PROFILE_MATCH.reasoning.test(m.id));
+  }
+  return PROFILE_MATCH[profile] ? list.filter((m) => PROFILE_MATCH[profile].test(m.id)) : [];
+}
+
+function orderModels(models, profile, inputChars) {
+  const needCtx = Math.ceil(inputChars / 3) + 2000;
+  let list = models.filter((m) => !m.ctx || m.ctx >= needCtx);
+  if (!list.length) list = models;
+  const primary = primaryFor(list, profile);
+  const ordered = [...primary, ...list.filter((m) => !primary.includes(m))];
+  const now = Date.now();
+  const healthy = ordered.filter((m) => !(now - (recentFailures.get(m.id) || 0) < FAILURE_SKIP_MS));
+  const failing = ordered.filter((m) => !healthy.includes(m));
+  return [...healthy, ...failing].map((m) => m.id);
+}
+
+function chooseProfile(role, requested, inputChars) {
+  if (PROFILES.includes(requested)) return requested;
+  if (inputChars > 24000) return "long";
+  return ROLE_PROFILE[role] || "writing";
+}
+
+async function runRole(env, role, task, context, requestedProfile) {
+  const all = await freeModels(env);
   const userContent = context ? task + "\n\n---\nKontext:\n" + context : task;
+  const profile = chooseProfile(role, requestedProfile, userContent.length);
+  const models = orderModels(all, profile, userContent.length);
+  const baseTokens = Math.min(4000, Math.max(100, Number(env.MAX_TOKENS) || 1000));
+  const maxTokens = profile === "reasoning" || profile === "code" ? Math.min(4000, baseTokens * 2) : baseTokens;
   let lastErr = null;
   for (const model of models.slice(0, MAX_MODEL_ATTEMPTS)) {
     // Harte Sicherung: niemals ein Modell ohne ":free" aufrufen
@@ -106,7 +162,7 @@ async function runRole(env, role, task, context) {
         headers: { "Authorization": "Bearer " + env.OPENROUTER_API_KEY, "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
-          max_tokens: Math.min(4000, Math.max(100, Number(env.MAX_TOKENS) || 1000)),
+          max_tokens: maxTokens,
           messages: [
             { role: "system", content: "Du bist ein KI-Spezialist für " + role + ". Antworte knapp auf Deutsch." },
             { role: "user", content: userContent },
@@ -116,10 +172,13 @@ async function runRole(env, role, task, context) {
       data = await r.json().catch(() => ({}));
     } catch {
       lastErr = new AppError(502, "openrouter_unreachable", "OpenRouter nicht erreichbar.");
+      recentFailures.set(model, Date.now());
       continue;
     }
-    const answer = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-    if (r.ok && answer) return { output: answer, model };
+    const choice = data && data.choices && data.choices[0];
+    const answer = choice && choice.message && choice.message.content;
+    if (r.ok && answer) return { output: answer, model, profile, finishReason: choice.finish_reason || undefined };
+    recentFailures.set(model, Date.now());
     const msg = (data && data.error && data.error.message) || ("HTTP " + r.status);
     if (r.status === 429) {
       // Free-Kontingent bei OpenRouter erschöpft – weitere Versuche wären sinnlos
@@ -148,6 +207,14 @@ async function handleMcpApi(request, env, path) {
     if (path === "/api/mcp/v1/usage" && request.method === "GET") {
       return json(await usage(env));
     }
+    if (path === "/api/mcp/v1/models" && request.method === "GET") {
+      const models = await freeModels(env);
+      const profiles = {};
+      for (const p of PROFILES) {
+        profiles[p] = primaryFor(models, p).slice(0, 5).map((m) => m.id);
+      }
+      return json({ free: models.length, profiles, version: VERSION });
+    }
     if (path === "/api/mcp/v1/run" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
       const role = rollen.find((r) => r === body.roleId);
@@ -155,9 +222,11 @@ async function handleMcpApi(request, env, path) {
       const task = String(body.task || "").slice(0, 8000);
       const context = body.context ? String(body.context).slice(0, 12000) : "";
       if (!task.trim()) throw new AppError(400, "empty_task", "Bitte Aufgabe angeben.");
+      const profile = body.profile === undefined || body.profile === null ? undefined : String(body.profile);
+      if (profile !== undefined && !PROFILES.includes(profile)) throw new AppError(400, "bad_profile", "Unbekanntes Modellprofil.");
       const u = await countRequest(env);
-      const res = await runRole(env, role, task, context);
-      return json({ roleId: role, roleName: role, output: res.output, model: res.model, usage: u });
+      const res = await runRole(env, role, task, context, profile);
+      return json({ roleId: role, roleName: role, output: res.output, model: res.model, profile: res.profile, finishReason: res.finishReason, usage: u });
     }
     throw new AppError(404, "not_found", "Unbekannter Endpunkt.");
   } catch (e) {
