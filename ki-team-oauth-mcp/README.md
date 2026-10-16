@@ -76,5 +76,6 @@ Alle Anfragen kommen über das Service-Binding und tragen `x-workspace-password`
 
 GitHub Actions (`.github/workflows/ki-team-oauth-mcp.yml`) installiert, prüft TypeScript,
 baut das Bundle per `wrangler deploy --dry-run` und führt `test/e2e.mjs` aus: kompletter
-OAuth-Ablauf (inkl. Negativtests) und alle Tools gegen eine Attrappe des Hauptworkers
-(`test/mock-backend`, wird nie bereitgestellt).
+OAuth-Ablauf (inkl. Negativtests), alle Tools gegen den **echten** Hauptworker-Code
+(`claude-ki-team/worker.js`) mit einer OpenRouter-Attrappe, Limits und Kostenschutz.
+Es werden keine echten Zugangsdaten verwendet und nichts bereitgestellt.

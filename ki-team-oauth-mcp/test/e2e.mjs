@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 const BASE = "http://127.0.0.1:8788";
 const CLAUDE_REDIRECT = "https://claude.ai/api/mcp/auth_callback";
 const ALLOWED_ID = 340084289;
-const SECRETS = ["test-workspace-pw", "test-client-secret"];
+const SECRETS = ["test-workspace-pw", "test-client-secret", "test-or-key"];
 
 let passed = 0;
 const failures = [];
@@ -46,25 +46,65 @@ const gh = createServer(async (req, res) => {
 });
 await new Promise((r) => gh.listen(8790, "127.0.0.1", r));
 
-// ---------- wrangler dev starten ----------
-const wr = spawn("npx", ["wrangler", "dev", "-c", "wrangler.test.jsonc", "-c", "test/mock-backend/wrangler.jsonc", "--persist-to", ".wrangler/e2e-state"], {
-	env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "true" },
-	stdio: ["ignore", "pipe", "pipe"],
+// ---------- OpenRouter-Attrappe ----------
+const FREE_A = "mock/a:free";
+const FREE_B = "mock/b:free";
+const modelCalls = [];
+const orServer = createServer(async (req, res) => {
+	let body = "";
+	for await (const c of req) body += c;
+	res.setHeader("content-type", "application/json");
+	if (req.url === "/api/v1/models") {
+		return res.end(JSON.stringify({ data: [
+			{ id: "paid/expensive", pricing: { prompt: "0.001", completion: "0.002" } },
+			{ id: "trap/fake:free", pricing: { prompt: "0", completion: "0.000001" } },
+			{ id: FREE_A, pricing: { prompt: "0", completion: "0", request: "0" } },
+			{ id: FREE_B, pricing: { prompt: "0", completion: "0" } },
+		] }));
+	}
+	if (req.url === "/api/v1/chat/completions") {
+		if (req.headers.authorization !== "Bearer test-or-key") { res.statusCode = 401; return res.end(JSON.stringify({ error: { message: "no key" } })); }
+		const b = JSON.parse(body);
+		modelCalls.push(b.model);
+		const role = (b.messages?.[0]?.content.match(/Spezialist für (.+)\. Antworte/) ?? [])[1] ?? "?";
+		const user = b.messages?.[1]?.content ?? "";
+		const down = (user.includes("MODEL_DOWN") && b.model === FREE_A) || (role === "SEO" && user.includes("FAIL_ROLE"));
+		if (down) { res.statusCode = 503; return res.end(JSON.stringify({ error: { message: "Provider down" } })); }
+		let content = `MOCK-ANTWORT von ${role}: ${user.split("\n---\nKontext:")[0].slice(0, 40)}${user.includes("Kontext:") ? " [mit Kontext]" : ""}`;
+		if (role === "KI-Koordination" && user.includes("AUSSCHLIESSLICH mit JSON")) content = 'Hier: {"roles":["Marketing","SEO","gibtsnicht"],"reason":"Marketingthema"}';
+		return res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+	}
+	res.statusCode = 404; res.end("{}");
 });
-let wrLog = "";
-wr.stdout.on("data", (d) => (wrLog += d));
-wr.stderr.on("data", (d) => (wrLog += d));
+await new Promise((r) => orServer.listen(8791, "127.0.0.1", r));
 
-async function waitReady() {
+// ---------- wrangler dev ----------
+let wr;
+let wrLog = "";
+function startWrangler(args) {
+	wrLog = "";
+	wr = spawn("npx", ["wrangler", "dev", ...args], { env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "true" }, stdio: ["ignore", "pipe", "pipe"] });
+	wr.stdout.on("data", (d) => (wrLog += d));
+	wr.stderr.on("data", (d) => (wrLog += d));
+}
+async function stopWrangler() {
+	if (!wr) return;
+	const p = new Promise((r) => wr.once("exit", r));
+	wr.kill("SIGTERM");
+	await Promise.race([p, new Promise((r) => setTimeout(r, 5000))]);
+	wr = undefined;
+}
+async function waitReady(base) {
 	for (let i = 0; i < 120; i++) {
 		try {
-			const r = await fetch(`${BASE}/`);
+			const r = await fetch(`${base}/`);
 			if (r.status === 200) return;
 		} catch {}
 		await new Promise((r) => setTimeout(r, 1000));
 	}
 	throw new Error(`wrangler dev nicht bereit:\n${wrLog.slice(-4000)}`);
 }
+startWrangler(["-c", "wrangler.test.jsonc", "-c", "test/main-worker.wrangler.jsonc", "--persist-to", ".wrangler/e2e-state"]);
 
 function cookiesFrom(res) {
 	const out = {};
@@ -77,16 +117,17 @@ function cookiesFrom(res) {
 }
 
 let allOutput = "";
-const finish = (code) => {
-	wr.kill("SIGTERM");
+const finish = async (code) => {
+	await stopWrangler();
 	gh.close();
+	orServer.close();
 	console.log(`\nErgebnis: ${passed} bestanden, ${failures.length} fehlgeschlagen`);
 	if (failures.length) console.log(failures.map((f) => ` - ${f}`).join("\n"));
 	process.exit(code);
 };
 
 try {
-	await waitReady();
+	await waitReady(BASE);
 	console.log("wrangler dev läuft.\n");
 
 	console.log("1) Unauthentifizierter Zugriff");
@@ -262,7 +303,7 @@ try {
 	check("ki_team_list_roles liefert 26 Rollen", !t.isError && t.text.startsWith("26 Rollen") && t.text.includes("KI-Koordination"), t.text.slice(0, 200));
 
 	t = await callTool("ki_team_run_role", { role: "marketing", task: "Strategie für Gartencenter" });
-	check("ki_team_run_role erreicht Hauptworker", !t.isError && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes("11/12"), t.text);
+	check("ki_team_run_role erreicht Hauptworker + OpenRouter", !t.isError && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes(FREE_A) && t.text.includes("11/12"), t.text);
 	t = await callTool("ki_team_run_role", { role: "Gibt es nicht", task: "x" });
 	check("Unbekannte Rolle → Fehler ohne Verbrauch", t.isError && t.text.includes("nicht gefunden"), t.text);
 
@@ -273,13 +314,13 @@ try {
 	check("ki_team_collaborate parallel + Zusammenfassung", !t.isError && t.text.includes("MOCK-ANTWORT von Programmierung") && t.text.includes("MOCK-ANTWORT von Sicherheit") && t.text.includes("Zusammenfassung (KI-Koordination)") && t.text.includes("6/12"), t.text);
 
 	t = await callTool("ki_team_collaborate", { task: "FAIL_ROLE Kampagne", roles: ["Marketing", "SEO"], mode: "sequential" });
-	check("ki_team_collaborate sequenziell, Teilfehler wird gemeldet", !t.isError && t.text.includes("Free-Modell nicht verfügbar") && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes("3/12"), t.text);
+	check("ki_team_collaborate sequenziell, Teilfehler wird gemeldet", !t.isError && t.text.includes("model_unavailable") && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes("[mit Kontext]") && t.text.includes("3/12"), t.text);
 
 	t = await callTool("ki_team_collaborate", { task: "zu teuer", roles: ["Marketing", "SEO", "Recherche"] });
 	check("Collaborate wird vorab abgelehnt, wenn Budget nicht reicht", t.isError && t.text.includes("Tageslimit erreicht"), t.text);
 
 	t = await callTool("ki_team_usage");
-	check("ki_team_usage", !t.isError && t.text.includes("3/12") && t.text.includes("Hauptworker-Limit"), t.text);
+	check("ki_team_usage zeigt beide Limits", !t.isError && t.text.includes("3/12") && /Hauptworker-Limit: \d+\/20 genutzt/.test(t.text), t.text);
 
 	console.log("9) Atomares Limit bei parallelen Aufrufen");
 	const par = await Promise.all(Array.from({ length: 6 }, (_, i) => callTool("ki_team_run_role", { role: "Recherche", task: `parallel ${i}` })));
@@ -291,10 +332,45 @@ try {
 	console.log("10) Keine Secrets in Antworten");
 	check("Keine Secrets in MCP-Ausgaben", !SECRETS.some((s) => allOutput.includes(s)));
 
-	finish(failures.length ? 1 : 0);
+	console.log("11) Hauptworker direkt (Weboberfläche + Schutz der internen API)");
+	await stopWrangler();
+	const UI = "http://127.0.0.1:8789";
+	startWrangler(["-c", "test/main-worker.wrangler.jsonc", "--port", "8789", "--ip", "127.0.0.1", "--var", "DAILY_REQUEST_LIMIT:3", "--persist-to", ".wrangler/ui-state"]);
+	await waitReady(UI);
+	r = await fetch(`${UI}/`);
+	check("Weboberfläche lädt", (await r.text()).includes("26 Agenten"));
+	const chat = (pw, task, role = "Marketing") =>
+		fetch(`${UI}/api/chat`, { method: "POST", headers: { "content-type": "application/json", "x-workspace-password": pw }, body: JSON.stringify({ role, task }) });
+	r = await chat("falsch", "x");
+	check("/api/chat mit falschem Passwort → 401", r.status === 401, `(war ${r.status})`);
+	for (const path of ["roles", "usage", "health"]) {
+		r = await fetch(`${UI}/api/mcp/v1/${path}`);
+		check(`/api/mcp/v1/${path} ohne Passwort → 401`, r.status === 401, `(war ${r.status})`);
+	}
+	r = await fetch(`${UI}/api/mcp/v1/run`, { method: "POST", headers: { "x-workspace-password": "falsch", "content-type": "application/json" }, body: JSON.stringify({ roleId: "SEO", task: "x" }) });
+	check("/api/mcp/v1/run mit falschem Passwort → 401", r.status === 401, `(war ${r.status})`);
+	r = await chat("test-workspace-pw", "Hallo Team");
+	let d = await r.json();
+	check("/api/chat liefert Antwort", r.ok && d.answer?.includes("MOCK-ANTWORT von Marketing"), JSON.stringify(d));
+	r = await chat("test-workspace-pw", "MODEL_DOWN bitte");
+	d = await r.json();
+	check("Fallback auf zweites Free-Modell", r.ok && d.model === FREE_B, JSON.stringify(d));
+	r = await chat("test-workspace-pw", "dritte");
+	check("3. Anfrage erlaubt", r.ok);
+	r = await chat("test-workspace-pw", "vierte");
+	check("Tageslimit des Hauptworkers greift (429)", r.status === 429, `(war ${r.status})`);
+	r = await fetch(`${UI}/api/mcp/v1/usage`, { headers: { "x-workspace-password": "test-workspace-pw" } });
+	d = await r.json();
+	check("Nutzung wird korrekt gemeldet", d.used === 3 && d.limit === 3 && d.remaining === 0, JSON.stringify(d));
+
+	console.log("12) Kostenschutz");
+	check("Nur :free-Modelle wurden aufgerufen", modelCalls.length > 0 && modelCalls.every((m) => m === FREE_A || m === FREE_B), JSON.stringify(modelCalls));
+	check("Kostenpflichtiges / falsch markiertes Modell nie benutzt", !modelCalls.includes("paid/expensive") && !modelCalls.includes("trap/fake:free"));
+
+	await finish(failures.length ? 1 : 0);
 } catch (e) {
 	console.error("Testabbruch:", e);
 	console.error(wrLog.slice(-4000));
 	failures.push(`Abbruch: ${e.message}`);
-	finish(1);
+	await finish(1);
 }

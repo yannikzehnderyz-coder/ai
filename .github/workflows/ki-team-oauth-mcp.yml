@@ -7,9 +7,9 @@ name: KI-Team MCP prüfen
 on:
   push:
     branches: ["ki-team-*"]
-    paths: ["ki-team-oauth-mcp/**", ".github/workflows/ki-team-oauth-mcp.yml"]
+    paths: ["ki-team-oauth-mcp/**", "claude-ki-team/**", ".github/workflows/ki-team-oauth-mcp.yml"]
   pull_request:
-    paths: ["ki-team-oauth-mcp/**", ".github/workflows/ki-team-oauth-mcp.yml"]
+    paths: ["ki-team-oauth-mcp/**", "claude-ki-team/**", ".github/workflows/ki-team-oauth-mcp.yml"]
   workflow_dispatch:
 
 permissions:

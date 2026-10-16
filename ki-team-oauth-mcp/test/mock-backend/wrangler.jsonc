@@ -1,7 +1,0 @@
-// NUR FÜR TESTS: Attrappe des Hauptworkers "claude-ki-team" (wird nie bereitgestellt).
-{
-	"name": "claude-ki-team",
-	"main": "index.js",
-	"compatibility_date": "2025-03-10",
-	"vars": { "WORKSPACE_PASSWORD": "test-workspace-pw" }
-}
