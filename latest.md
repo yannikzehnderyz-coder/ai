@@ -1,5 +1,5 @@
 # KI-Team MCP – Prüfbericht
-Commit: 96b46236b7c92548d74ed7e1a310e6285abf71f0 · Ref: ki-team-oauth-mcp · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38874351001
+Commit: 1b3062b1bf58e7f12b42d897a8b441797ac654af · Ref: 1/merge · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38874357245
 
 | Schritt | Ergebnis |
 |---|---|
@@ -11,7 +11,7 @@ Commit: 96b46236b7c92548d74ed7e1a310e6285abf71f0 · Ref: ki-team-oauth-mcp · La
 ## install
 ```
 
-added 223 packages in 5s
+added 223 packages in 6s
 ```
 
 ## typecheck
