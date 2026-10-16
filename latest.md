@@ -1,17 +1,18 @@
 # KI-Team MCP – Prüfbericht
-Commit: f32b5fd28743f341cbc6764556ba15c30a2bd287 · Ref: 2/merge · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38894141673
+Commit: 9293f85b67828ff6d3db8fe033486da0835a381b · Ref: ki-team-main-worker-deploy · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38896926666
 
 | Schritt | Ergebnis |
 |---|---|
 | Installation | success |
 | TypeScript | success |
 | Bundle (dry-run) | success |
+| Hauptworker-Bundle (dry-run) | success |
 | End-to-End-Test | success |
 
 ## install
 ```
 
-added 223 packages in 7s
+added 223 packages in 5s
 ```
 
 ## typecheck
@@ -40,6 +41,21 @@ env.VERIFY_ROLE ("Kritische Prüfung")                                        En
 env.QUALITY_RESERVE ("4")                                                    Environment Variable      
 env.CACHE_TTL_MINUTES ("360")                                                Environment Variable      
 env.ALLOWED_REVIEW_OWNERS ("yannikzehnderyz-coder")                          Environment Variable      
+
+--dry-run: exiting now.
+```
+
+## build-main
+```
+
+added 38 packages in 5s
+
+ ⛅️ wrangler 4.151.1
+────────────────────
+Total Upload: 12.78 KiB / gzip: 4.73 KiB
+Your Worker has access to the following bindings:
+Binding                                               Resource          
+env.LIMITS_KV (e9bfead1afcf47eea88d640cd684a644)      KV Namespace      
 
 --dry-run: exiting now.
 ```
