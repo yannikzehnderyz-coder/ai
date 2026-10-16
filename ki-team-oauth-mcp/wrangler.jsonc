@@ -1,0 +1,66 @@
+/**
+ * KI-Team OAuth-MCP-Server (Cloudflare Workers Free).
+ *
+ * Secrets (NIE hier eintragen, nur im Cloudflare-Dashboard unter
+ * Worker > Einstellungen > Variablen und Geheimnisse als "Geheimnis"):
+ *   GITHUB_CLIENT_ID      – Client-ID der GitHub-OAuth-App
+ *   GITHUB_CLIENT_SECRET  – Client-Secret der GitHub-OAuth-App
+ *   KI_TEAM_PASSWORD      – dasselbe Workspace-Passwort, das der Hauptworker
+ *                           "claude-ki-team" im Header x-workspace-password prüft
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "ki-team-oauth-mcp",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-03-10",
+	"compatibility_flags": ["nodejs_compat"],
+	"workers_dev": true,
+	"preview_urls": false,
+
+	// v1 ist bereits durch die zuvor bereitgestellte Demo angewendet (MyMCP).
+	// UsageLimiter MUSS daher eine eigene, neue Migration bekommen.
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["MyMCP"] },
+		{ "tag": "v2", "new_sqlite_classes": ["UsageLimiter"] }
+	],
+	"durable_objects": {
+		"bindings": [
+			{ "class_name": "MyMCP", "name": "MCP_OBJECT" },
+			{ "class_name": "UsageLimiter", "name": "USAGE_LIMITER" }
+		]
+	},
+
+	// Vorhandener KV-Namespace "ki-team-oauth" (bereits angelegt, nicht duplizieren)
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"id": "328dc2347f26431ab765fb47ddb5adbc"
+		}
+	],
+
+	// Interne Verbindung zum bestehenden Hauptworker – kein öffentlicher HTTP-Aufruf
+	"services": [
+		{
+			"binding": "KI_TEAM",
+			"service": "claude-ki-team"
+		}
+	],
+
+	// Nicht-geheime Konfiguration
+	"vars": {
+		// Nur dieser GitHub-Account (numerische, unveränderliche ID von "yannikzehnderyz-coder") darf sich anmelden
+		"ALLOWED_GITHUB_USER_IDS": "340084289",
+		// Nur Claude (claude.ai / Desktop / Mobile) darf Tokens empfangen
+		"ALLOWED_REDIRECT_URIS": "https://claude.ai/api/mcp/auth_callback",
+		// Harte Obergrenze für KI-Aufrufe über MCP pro UTC-Tag (zusätzlich zum Limit im Hauptworker)
+		"MCP_DAILY_LIMIT": "20",
+		// Schutz vor Bursts (OpenRouter-Free erlaubt nur wenige Anfragen pro Minute)
+		"MCP_PER_MINUTE_LIMIT": "6",
+		// Rolle, die für automatische Delegation und Zusammenfassungen genutzt wird
+		"COORDINATOR_ROLE": "KI-Koordination"
+	},
+
+	"observability": {
+		"enabled": true
+	}
+}

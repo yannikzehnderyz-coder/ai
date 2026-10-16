@@ -1,0 +1,24 @@
+{
+	"name": "ki-team-oauth-mcp",
+	"version": "1.0.0",
+	"private": true,
+	"description": "Privater Remote-MCP-Server (OAuth via GitHub) für das KI-Team auf Cloudflare Workers",
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"type-check": "tsc --noEmit",
+		"check": "tsc --noEmit && wrangler deploy --dry-run --outdir dist"
+	},
+	"dependencies": {
+		"@cloudflare/workers-oauth-provider": "^0.8.1",
+		"@modelcontextprotocol/sdk": "1.29.0",
+		"agents": "^0.17.1",
+		"hono": "^4.12.27",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^5.20261006.1",
+		"typescript": "6.0.3",
+		"wrangler": "^4.105.0"
+	}
+}

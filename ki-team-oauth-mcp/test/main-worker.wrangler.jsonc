@@ -1,0 +1,13 @@
+// NUR FÜR TESTS: echter Hauptworker-Code (claude-ki-team/worker.js) gegen eine OpenRouter-Attrappe.
+{
+	"name": "claude-ki-team",
+	"main": "../../claude-ki-team/worker.js",
+	"compatibility_date": "2025-03-10",
+	"kv_namespaces": [{ "binding": "LIMITS_KV", "id": "test-limits" }],
+	"vars": {
+		"APP_PASSWORD": "test-workspace-pw",
+		"OPENROUTER_API_KEY": "test-or-key",
+		"DAILY_REQUEST_LIMIT": "20",
+		"OPENROUTER_BASE": "http://127.0.0.1:8791/api/v1"
+	}
+}
