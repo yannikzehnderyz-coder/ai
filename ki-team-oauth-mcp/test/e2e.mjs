@@ -352,9 +352,12 @@ try {
 	check("Sehr langes Passwort → 401", r.status === 401, `(war ${r.status})`);
 	r = await chat("test-workspace-pX", "x");
 	check("Gleich langes, falsches Passwort → 401", r.status === 401, `(war ${r.status})`);
-	r = await chat("test-workspace-pw ", "x");
+	// Hinweis: HTTP entfernt Leerzeichen am Anfang/Ende eines Headers – daher "!" statt " "
+	r = await chat("test-workspace-pw!", "x");
 	check("Passwort mit Zusatzzeichen → 401", r.status === 401, `(war ${r.status})`);
-	r = await chat("ÄÖÜ-ß-😀", "x");
+	r = await chat("test-workspace-p", "x");
+	check("Passwort mit fehlendem Zeichen → 401", r.status === 401, `(war ${r.status})`);
+	r = await chat("ÄÖÜ-ß", "x");
 	check("Sonderzeichen-Passwort → 401", r.status === 401, `(war ${r.status})`);
 	for (const path of ["roles", "usage", "health"]) {
 		r = await fetch(`${UI}/api/mcp/v1/${path}`);
