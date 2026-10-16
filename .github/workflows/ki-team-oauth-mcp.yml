@@ -102,13 +102,21 @@ jobs:
             done
           } > report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
-          mkdir -p /tmp/rep && cp report.md "/tmp/rep/report-${GITHUB_SHA}.md" && cp report.md /tmp/rep/latest.md
-          cd /tmp/rep
-          git init -q -b ci-reports
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add . && git commit -qm "CI-Bericht ${GITHUB_SHA}"
-          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-reports
+          # Berichte sammeln statt überschreiben (eine Datei pro Lauf), mit Wiederholung bei gleichzeitigen Läufen
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          NAME="report-${GITHUB_SHA}-run${GITHUB_RUN_ID}-${GITHUB_EVENT_NAME}.md"
+          for attempt in 1 2 3 4 5; do
+            rm -rf /tmp/rep && mkdir -p /tmp/rep && cd /tmp/rep
+            git init -q -b ci-reports
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            if git fetch -q "$REMOTE" ci-reports 2>/dev/null; then git reset -q --hard FETCH_HEAD; fi
+            cp "$GITHUB_WORKSPACE/report.md" "$NAME"
+            cp "$GITHUB_WORKSPACE/report.md" latest.md
+            git add . && git commit -qm "CI-Bericht ${GITHUB_SHA} (${GITHUB_EVENT_NAME})"
+            if git push -q "$REMOTE" ci-reports; then break; fi
+            sleep $((attempt * 3))
+          done
 
       - name: Gesamtergebnis
         if: always()
