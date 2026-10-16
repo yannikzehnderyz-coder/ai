@@ -1,5 +1,5 @@
 # KI-Team MCP – Prüfbericht
-Commit: 1b3062b1bf58e7f12b42d897a8b441797ac654af · Ref: 1/merge · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38874357245
+Commit: d367a16ae2045e265335366285b86caf18baebcd · Ref: ki-team-v3 · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38894010732
 
 | Schritt | Ergebnis |
 |---|---|
@@ -11,7 +11,7 @@ Commit: 1b3062b1bf58e7f12b42d897a8b441797ac654af · Ref: 1/merge · Lauf: https:
 ## install
 ```
 
-added 223 packages in 6s
+added 223 packages in 7s
 ```
 
 ## typecheck
@@ -23,11 +23,12 @@ added 223 packages in 6s
 
  ⛅️ wrangler 4.151.0
 ────────────────────
-Total Upload: 2593.06 KiB / gzip: 465.98 KiB
+Total Upload: 2643.80 KiB / gzip: 480.57 KiB
 Your Worker has access to the following bindings:
 Binding                                                                      Resource                  
 env.MCP_OBJECT (MyMCP)                                                       Durable Object            
 env.USAGE_LIMITER (UsageLimiter)                                             Durable Object            
+env.PROJECT_STORE (ProjectStore)                                             Durable Object            
 env.OAUTH_KV (328dc2347f26431ab765fb47ddb5adbc)                              KV Namespace              
 env.KI_TEAM (claude-ki-team)                                                 Worker                    
 env.ALLOWED_GITHUB_USER_IDS ("340084289")                                    Environment Variable      
@@ -35,6 +36,10 @@ env.ALLOWED_REDIRECT_URIS ("https://claude.ai/api/mcp/auth_callback")        Env
 env.MCP_DAILY_LIMIT ("20")                                                   Environment Variable      
 env.MCP_PER_MINUTE_LIMIT ("6")                                               Environment Variable      
 env.COORDINATOR_ROLE ("KI-Koordination")                                     Environment Variable      
+env.VERIFY_ROLE ("Kritische Prüfung")                                        Environment Variable      
+env.QUALITY_RESERVE ("4")                                                    Environment Variable      
+env.CACHE_TTL_MINUTES ("360")                                                Environment Variable      
+env.ALLOWED_REVIEW_OWNERS ("yannikzehnderyz-coder")                          Environment Variable      
 
 --dry-run: exiting now.
 ```
@@ -76,20 +81,63 @@ wrangler dev läuft.
   ✔ Refresh-Token wird ausgestellt
 8) MCP
   ✔ MCP initialize
-  ✔ Alle 6 Tools vorhanden
+  ✔ Server-Version 3.0.0
+  ✔ Alle 6 bisherigen Tools weiterhin vorhanden
+  ✔ 6 neue Tools vorhanden (12 gesamt)
   ✔ Demo-Tool 'add' entfernt
   ✔ ki_team_status
+  ✔ Status zeigt nur kostenlose Modelle (4) und Routing
   ✔ ki_team_list_roles liefert 26 Rollen
+8a) Einzelauftrag, Cache, Qualitätsprüfung
   ✔ ki_team_run_role erreicht Hauptworker + OpenRouter
+  ✔ Automatische Qualitätsprüfung ohne Befund
+  ✔ Identische Anfrage kommt aus dem Cache (0 Aufrufe)
+  ✔ fresh=true umgeht den Cache
   ✔ Unbekannte Rolle → Fehler ohne Verbrauch
+8b) Delegation und Zusammenarbeit (bestehende Funktionen)
   ✔ ki_team_auto_delegate wählt Rolle und führt aus
   ✔ ki_team_collaborate parallel + Zusammenfassung
+  ✔ Modell-Routing: Programmierung → Code-Modell
+  ✔ Modell-Routing: Sicherheit → Reasoning-Modell
   ✔ ki_team_collaborate sequenziell, Teilfehler wird gemeldet
-  ✔ Collaborate wird vorab abgelehnt, wenn Budget nicht reicht
-  ✔ ki_team_usage zeigt beide Limits
+8c) Datenschutz vor Weitergabe an externe Modelle
+  ✔ Zugangsdaten werden blockiert (0 Aufrufe)
+  ✔ Personenbezogene Daten → Rückfrage (0 Aufrufe)
+  ✔ Mit Zustimmung wird ausgeführt
+  ✔ Zugangsdaten auch mit Zustimmung blockiert
+8d) Qualitätsprüfung + gezielte Nachprüfung
+  ✔ Abgeschnittene Antwort wird erkannt
+  ✔ Automatische Nachprüfung bei gravierendem Befund (+1 Aufruf)
+  ✔ verify=never → keine Nachprüfung
+  ✔ ki_team_quality_check ohne KI-Aufruf
+  ✔ Verweigerung wird erkannt
+8e) Projektgedächtnis
+  ✔ Projekt anlegen + Entscheidung speichern
+  ✔ Geheimnisse werden nicht gespeichert
+  ✔ Zweites Projekt angelegt
+  ✔ Projektliste
+  ✔ Projektkontext (Ziel + Entscheidung) wird mitgegeben
+  ✔ Strikte Trennung: anderes Projekt kennt die Entscheidung nicht
+  ✔ Projekt abrufen: Ziel, Entscheidung, Arbeitsstand
+  ✔ Unbekanntes Projekt → Fehler
+  ✔ Unbekanntes Projekt beim Auftrag → Fehler ohne Verbrauch
+8f) Mehrstufige Teamarbeit
+  ✔ Kostenschätzung ohne Ausführung
+  ✔ Pipeline: 3 Schritte nacheinander mit Übergabe
+  ✔ Pipeline hält bei gravierendem Problem an und gibt Budget zurück
+8g) Code- und Projektprüfung (nur lesend)
+  ✔ Statische Prüfung findet eval + XSS
+  ✔ KI-Prüfung durch Codeprüfung + Sicherheit mit Code-Profil
+  ✔ Nur lesend
+  ✔ Code mit Zugangsdaten: statische Prüfung ja, KI-Prüfung nein
+  ✔ PR von GitHub laden: SQL-Injection + XSS + fehlende Tests
+  ✔ Nicht freigegebener Besitzer wird abgelehnt
+  ✔ ki_team_usage zeigt beide Limits, Cache und Nachprüfungen
 9) Atomares Limit bei parallelen Aufrufen
-  ✔ Genau 3 von 6 parallelen Aufrufen erlaubt (Restbudget 3)
+  ✔ Genau 18 von 21 parallelen Aufrufen erlaubt
   ✔ Nach Erreichen des Limits → abgelehnt
+  ✔ Collaborate wird vorab abgelehnt, wenn Budget nicht reicht
+  ✔ Cache funktioniert auch bei ausgeschöpftem Limit
 10) Keine Secrets in Antworten
   ✔ Keine Secrets in MCP-Ausgaben
 11) Hauptworker direkt (Weboberfläche + Schutz der internen API)
@@ -112,8 +160,8 @@ wrangler dev läuft.
   ✔ Tageslimit des Hauptworkers greift (429)
   ✔ Nutzung wird korrekt gemeldet
 12) Kostenschutz
-  ✔ Nur :free-Modelle wurden aufgerufen
-  ✔ Kostenpflichtiges / falsch markiertes Modell nie benutzt
+  ✔ Nur :free-Modelle mit Preis 0 wurden aufgerufen
+  ✔ Kostenpflichtige / falsch markierte Modelle nie benutzt (auch nicht beim Routing)
 
-Ergebnis: 59 bestanden, 0 fehlgeschlagen
+Ergebnis: 95 bestanden, 0 fehlgeschlagen
 ```
