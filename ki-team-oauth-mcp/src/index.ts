@@ -31,8 +31,8 @@ function errorText(e: unknown): string {
 	return "Unerwarteter Fehler im MCP-Server.";
 }
 
-function formatRun(r: RunResult, fallbackName: string): string {
-	const name = r.roleName || fallbackName;
+function formatRun(r: RunResult, fallbackName: string, title?: string): string {
+	const name = title || r.roleName || fallbackName;
 	const model = r.model ? ` · Modell: ${r.model}` : "";
 	return `### ${name}${model}\n\n${r.output.trim()}`;
 }
@@ -184,7 +184,8 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 					].join("\n\n");
 					used++;
 					const routing = await this.backend.run(coord.id, routingTask);
-					const picked = parseRolePick(routing.output, candidates).slice(0, max_suggestions);
+					const pick = parseRolePick(routing.output, candidates);
+					const picked = { roles: pick.roles.slice(0, max_suggestions), reason: pick.reason };
 					if (!picked.roles.length) {
 						await this.release(units - used);
 						return err(`Der Koordinator konnte keine Rolle zuordnen. Antwort war:\n${clip(routing.output, 1500)}`);
@@ -285,7 +286,7 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 					await this.release(units - used);
 
 					const parts = results.map((x) => (x.res ? formatRun(x.res, x.role.name) : `### ${x.role.name}\n\n⚠️ ${x.error}`));
-					if (synthesis) parts.push(formatRun(synthesis, `Zusammenfassung (${coord!.name})`));
+					if (synthesis) parts.push(formatRun(synthesis, coord!.name, `Zusammenfassung (${coord!.name})`));
 					if (synthesisNote) parts.push(synthesisNote);
 					const s = await limiterStub(this.env).status("ai", this.limits().daily);
 					return { content: [{ type: "text", text: `${parts.join("\n\n")}\n\n---\n${describeLimit(s)}` }], isError: good.length === 0 };
