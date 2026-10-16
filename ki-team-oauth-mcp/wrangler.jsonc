@@ -17,11 +17,11 @@
 	"workers_dev": true,
 	"preview_urls": false,
 
+	// v1 ist bereits durch die zuvor bereitgestellte Demo angewendet (MyMCP).
+	// UsageLimiter MUSS daher eine eigene, neue Migration bekommen.
 	"migrations": [
-		{
-			"tag": "v1",
-			"new_sqlite_classes": ["MyMCP", "UsageLimiter"]
-		}
+		{ "tag": "v1", "new_sqlite_classes": ["MyMCP"] },
+		{ "tag": "v2", "new_sqlite_classes": ["UsageLimiter"] }
 	],
 	"durable_objects": {
 		"bindings": [
