@@ -1,0 +1,23 @@
+/**
+ * Bereitstellungs-Konfiguration für den Hauptworker "claude-ki-team" (Workers Builds aus GitHub).
+ *
+ * Bewusst minimal, damit nichts Bestehendes verändert wird:
+ *  - Secrets (OPENROUTER_API_KEY, APP_PASSWORD) stehen NICHT hier und bleiben beim Deploy erhalten.
+ *  - keep_vars: true  -> im Dashboard gesetzte Variablen (z. B. DAILY_REQUEST_LIMIT) bleiben unverändert.
+ *  - LIMITS_KV zeigt auf den bestehenden Namespace "ki-team-limits" (Tageszähler bleibt erhalten).
+ *  - Der Code nutzt keine weiteren Bindings.
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "claude-ki-team",
+	"main": "worker.js",
+	"compatibility_date": "2025-03-10",
+	"workers_dev": true,
+	"keep_vars": true,
+	"kv_namespaces": [
+		{
+			"binding": "LIMITS_KV",
+			"id": "e9bfead1afcf47eea88d640cd684a644"
+		}
+	]
+}

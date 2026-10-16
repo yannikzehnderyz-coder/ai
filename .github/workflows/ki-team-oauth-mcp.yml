@@ -60,6 +60,18 @@ jobs:
           set -o pipefail
           npx wrangler deploy --dry-run --outdir dist 2>&1 | tee ../ci-build.log
 
+      - name: Hauptworker-Bundle bauen (dry-run, keine Bereitstellung)
+        id: build_main
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        working-directory: claude-ki-team
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -o pipefail
+          if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi > ../ci-build-main.log 2>&1
+          npx wrangler deploy --dry-run --outdir dist 2>&1 | tee -a ../ci-build-main.log
+
       - name: End-to-End-Test (OAuth + MCP-Tools)
         id: e2e
         if: steps.install.outcome == 'success'
@@ -71,10 +83,11 @@ jobs:
       - name: package-lock.json sichern (nur beim ersten Lauf)
         if: github.event_name == 'push' && steps.install.outcome == 'success'
         run: |
-          if [ -n "$(git status --porcelain package-lock.json)" ]; then
+          if [ -n "$(git status --porcelain package-lock.json ../claude-ki-team/package-lock.json)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add package-lock.json
+            [ -f ../claude-ki-team/package-lock.json ] && git add ../claude-ki-team/package-lock.json
             git commit -m "chore(ki-team-oauth-mcp): package-lock.json für reproduzierbare Builds"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
@@ -94,8 +107,9 @@ jobs:
             echo "| Installation | ${{ steps.install.outcome }} |"
             echo "| TypeScript | ${{ steps.typecheck.outcome }} |"
             echo "| Bundle (dry-run) | ${{ steps.build.outcome }} |"
+            echo "| Hauptworker-Bundle (dry-run) | ${{ steps.build_main.outcome }} |"
             echo "| End-to-End-Test | ${{ steps.e2e.outcome }} |"
-            for f in install typecheck build e2e; do
+            for f in install typecheck build build-main e2e; do
               if [ -f "ci-$f.log" ]; then
                 echo ""; echo "## $f"; echo '```'; tail -c 30000 "ci-$f.log"; echo '```'
               fi
@@ -124,4 +138,5 @@ jobs:
           test "${{ steps.install.outcome }}" = success
           test "${{ steps.typecheck.outcome }}" = success
           test "${{ steps.build.outcome }}" = success
+          test "${{ steps.build_main.outcome }}" = success
           test "${{ steps.e2e.outcome }}" = success

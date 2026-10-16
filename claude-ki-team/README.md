@@ -18,3 +18,10 @@ Modell-Routing nach Aufgabenprofil (`code`, `reasoning`, `writing`, `fast`, `lon
 kostenlose `:free`-Modelle mit Preis 0, Fallback auf weitere Free-Modelle, `finish_reason` in der
 Antwort und Endpunkt `/api/mcp/v1/models`. Weboberfläche und `/api/chat` bleiben kompatibel.
 Rückweg: `backup/worker-v1-original-2026-10-16.js` oder die v2-Version aus der Git-Historie.
+
+## Bereitstellung über GitHub (Workers Builds)
+
+Statt im Dashboard-Editor kann der Worker aus diesem Ordner gebaut werden:
+Worker `claude-ki-team` → Einstellungen → Build → mit `yannikzehnderyz-coder/ai` verbinden,
+Branch `main`, Root-Verzeichnis `claude-ki-team`, Build-Befehl leer, Deploy-Befehl `npx wrangler deploy`.
+`wrangler.jsonc` übernimmt nur `LIMITS_KV`; Secrets bleiben erhalten, Dashboard-Variablen dank `keep_vars`.

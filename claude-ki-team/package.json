@@ -1,0 +1,13 @@
+{
+	"name": "claude-ki-team",
+	"version": "3.0.0",
+	"private": true,
+	"description": "Hauptworker des privaten KI-Teams (26 Rollen, OpenRouter-Free)",
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"check": "wrangler deploy --dry-run --outdir dist"
+	},
+	"devDependencies": {
+		"wrangler": "^4.151.0"
+	}
+}
