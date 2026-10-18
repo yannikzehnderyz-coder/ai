@@ -21,7 +21,7 @@ import { checkSensitive } from "./sensitive";
 export { UsageLimiter } from "./limiter";
 export { ProjectStore } from "./projects";
 
-const VERSION = "3.0.0";
+const VERSION = "3.1.0";
 const MAX_TASK_CHARS = 8000;
 const MAX_CONTEXT_CHARS = 12000;
 const MAX_COLLAB_ROLES = 4;
@@ -31,6 +31,21 @@ const MAX_CODE_CHARS = 30000;
 const PROJECT_CONTEXT_CHARS = 3000;
 const HANDOVER_CHARS = 6000;
 const ROLE_CACHE_MS = 10 * 60_000;
+// Fehlgeschlagene KI-Aufrufe (kein Modell hat geantwortet) werden dem MCP-Kontingent zurückgegeben –
+// höchstens so oft pro Tag. Der Hauptworker zählt jeden Versuch trotzdem (harte Obergrenze).
+const FAIL_REFUND_CAP = 5;
+const REFUNDABLE_CODES = new Set([
+	"model_unavailable",
+	"empty_answer",
+	"no_free_model",
+	"models_unavailable",
+	"openrouter_unreachable",
+	"openrouter_rate_limit",
+	"openrouter_daily_limit",
+	"daily_limit",
+	"timeout",
+	"unreachable",
+]);
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 type VerifyMode = "auto" | "always" | "never";
@@ -221,10 +236,23 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 		}
 		if (budget.used >= budget.reserved) throw new BackendError("Internes Budget überschritten.", 500, "budget");
 		budget.used++;
-		const res = await this.backend.run(role.id, task, context, profile);
+		let res: RunResult;
+		try {
+			res = await this.backend.run(role.id, task, context, profile);
+		} catch (e) {
+			// Kein Modell hat geantwortet: Einheit zurückgeben (gedeckelt), damit Fehlschläge das Kontingent nicht aufbrauchen
+			if (e instanceof BackendError && REFUNDABLE_CODES.has(e.code) && (await this.refundAllowed())) budget.used--;
+			throw e;
+		}
 		const ttl = this.limits().cacheTtlMs;
 		if (ttl) await this.limiter.cachePut(key, JSON.stringify({ ...res, cached: undefined }), ttl);
 		return res;
+	}
+
+	/** Prüft und verbucht, ob heute noch eine Rückerstattung für einen Fehlschlag erlaubt ist. */
+	private async refundAllowed(): Promise<boolean> {
+		const r = await this.limiter.reserve("fail_refund", 1, FAIL_REFUND_CAP, 0);
+		return r.ok;
 	}
 
 	/** Gezielte Nachprüfung (nur bei Bedarf) – kostet 1 KI-Aufruf. */
@@ -271,7 +299,20 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 						const prof = Object.entries(m.profiles ?? {})
 							.map(([k, v]) => `${k} ${v.length}`)
 							.join(", ");
-						models = `Kostenlose Modelle: ${m.free}${prof ? ` · Routing-Profile: ${prof}` : ""}`;
+						const lines = [`Kostenlose Modelle: ${m.free}${prof ? ` · Routing-Profile: ${prof}` : ""}`];
+						if (m.limits) lines.push(`Fallback: bis zu ${m.limits.modelsPerRequest} Modelle je Anfrage, höchstens ${m.limits.maxRequests} Anfragen je Auftrag (nur Preis 0).`);
+						if (m.blockedUntil) lines.push(`⚠️ OpenRouter-Tageslimit erreicht – keine Anfragen bis ${m.blockedUntil} (UTC).`);
+						if (m.reliable?.length) lines.push(`Zuletzt zuverlässig: ${m.reliable.join(", ")}`);
+						if (m.cooling?.length) lines.push(`Pausiert (mehrere Fehlschläge): ${m.cooling.join(", ")}`);
+						if (m.recent?.length) {
+							const kinds = new Map<string, number>();
+							for (const r of m.recent) kinds.set(r.kind, (kinds.get(r.kind) ?? 0) + 1);
+							const last = m.recent[m.recent.length - 1];
+							lines.push(
+								`Letzte Fehlschläge: ${[...kinds].map(([k, n]) => `${k} ${n}×`).join(", ")} · zuletzt ${last.t.slice(0, 16).replace("T", " ")} UTC: ${last.kind}${last.status ? ` (HTTP ${last.status})` : ""}${last.models?.length ? ` – ${last.models.join(", ")}` : ""}`,
+							);
+						}
+						models = lines.join("\n");
 					} catch {
 						/* ältere Hauptworker-Version */
 					}
@@ -324,7 +365,12 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 					if (!res) {
 						const { denied } = await this.reserve(1);
 						if (denied) return denied;
-						res = await this.step(r, task, ctx, profile, { reserved: 1, used: 0 }, true);
+						const budget: Budget = { reserved: 1, used: 0 };
+						try {
+							res = await this.step(r, task, ctx, profile, budget, true);
+						} finally {
+							await this.release(budget.reserved - budget.used);
+						}
 					}
 					const q = assessQuality(task, res.output, res.finishReason);
 					const check = await this.verify(task, res.output, q, verify ?? "auto");
@@ -507,7 +553,11 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 			async () =>
 				this.safe(async () => {
 					const s = await this.status();
-					const [hits, checks] = await Promise.all([this.limiter.counter("cache_hit"), this.limiter.counter("verify")]);
+					const [hits, checks, refunds] = await Promise.all([
+						this.limiter.counter("cache_hit"),
+						this.limiter.counter("verify"),
+						this.limiter.counter("fail_refund"),
+					]);
 					let backendLine = "Hauptworker-Limit: nicht abrufbar.";
 					try {
 						const u = await this.backend.usage();
@@ -524,6 +574,7 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 							backendLine,
 							`Pro Minute max. ${l.perMinute} KI-Aufrufe über MCP.`,
 							`Heute aus dem Cache beantwortet (0 Aufrufe): ${hits} · Nachprüfungen: ${checks} · Reserve für Nachprüfungen: ${l.qualityReserve}.`,
+							`Zurückerstattete Fehlschläge heute: ${refunds}/${FAIL_REFUND_CAP} (danach zählen Fehlschläge normal).`,
 						].join("\n"),
 					);
 				}),

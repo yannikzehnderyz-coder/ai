@@ -52,12 +52,16 @@ const gh = createServer(async (req, res) => {
 });
 await new Promise((r) => gh.listen(8790, "127.0.0.1", r));
 
-// ---------- OpenRouter-Attrappe ----------
+// ---------- OpenRouter-Attrappe (emuliert die Fallback-Liste "models" wie OpenRouter) ----------
 const FREE_A = "mock/a:free";
 const FREE_B = "mock/b:free";
 const FREE_CODER = "mock/qwen-coder:free";
 const FREE_R1 = "mock/deepseek-r1:free";
+const FREE_C = "mock/c:free";
+const FREE_D = "mock/d:free";
+const FREE_SET = [FREE_A, FREE_B, FREE_CODER, FREE_R1, FREE_C, FREE_D];
 const modelCalls = [];
+const orRequests = [];
 const orServer = createServer(async (req, res) => {
 	let body = "";
 	for await (const c of req) body += c;
@@ -66,31 +70,56 @@ const orServer = createServer(async (req, res) => {
 		return res.end(JSON.stringify({ data: [
 			{ id: "paid/expensive", pricing: { prompt: "0.001", completion: "0.002" } },
 			{ id: "trap/fake:free", pricing: { prompt: "0", completion: "0.000001" } },
+			{ id: "trap/nopricing:free" },
 			{ id: FREE_A, pricing: { prompt: "0", completion: "0", request: "0" } },
 			{ id: FREE_B, pricing: { prompt: "0", completion: "0" } },
 			{ id: "trap/super-coder:free", pricing: { prompt: "0", completion: "0", request: "0.01" } },
 			{ id: "paid/qwen-coder-pro", pricing: { prompt: "0.002", completion: "0.002" } },
 			{ id: FREE_CODER, context_length: 32000, pricing: { prompt: "0", completion: "0" } },
 			{ id: FREE_R1, context_length: 64000, pricing: { prompt: "0", completion: "0" } },
+			{ id: FREE_C, pricing: { prompt: "0", completion: "0" } },
+			{ id: FREE_D, pricing: { prompt: "0", completion: "0" } },
 		] }));
 	}
 	if (req.url === "/api/v1/chat/completions") {
 		if (req.headers.authorization !== "Bearer test-or-key") { res.statusCode = 401; return res.end(JSON.stringify({ error: { message: "no key" } })); }
 		const b = JSON.parse(body);
-		modelCalls.push(b.model);
+		const list = Array.isArray(b.models) ? b.models : b.model ? [b.model] : [];
+		orRequests.push({ list, provider: b.provider, model: b.model });
+		modelCalls.push(...list);
+		if (b.model) modelCalls.push(b.model);
 		const role = (b.messages?.[0]?.content.match(/Spezialist für (.+)\. Antworte/) ?? [])[1] ?? "?";
 		const user = b.messages?.[1]?.content ?? "";
-		const down = (user.includes("MODEL_DOWN") && b.model === FREE_A) || (role === "SEO" && user.includes("FAIL_ROLE"));
-		if (down) { res.statusCode = 503; return res.end(JSON.stringify({ error: { message: "Provider down" } })); }
-		let content = `MOCK-ANTWORT von ${role}: ${user.split("\n---\nKontext:")[0].slice(0, 40)}${user.includes("Kontext:") ? " [mit Kontext]" : ""}${user.includes("Projektkontext") ? " [Projektkontext]" : ""}${user.includes("Farben: Grün/Weiß") ? " [Entscheidung bekannt]" : ""}`;
-		let finish = "stop";
-		if (role === "KI-Koordination" && user.includes("AUSSCHLIESSLICH mit JSON")) content = 'Hier: {"roles":["Marketing","SEO","gibtsnicht"],"reason":"Marketingthema"}';
-		if (user.split("\n---\nKontext:")[0].includes("TRUNCATE") && role !== "Kritische Prüfung") {
-			content = "Hier die Schritte:\n1. Ziel klären\n2. Aufgaben sammeln\n3. Zeitplan\n4. Budget\n5. Start und dann weiter mit";
-			finish = "length";
+		const userText = user.split("\n---\nKontext:")[0];
+		if (userText.includes("DAILYLIMIT")) {
+			res.statusCode = 429;
+			res.setHeader("x-ratelimit-limit", "50");
+			return res.end(JSON.stringify({ error: { code: 429, message: "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day" } }));
 		}
-		if (role === "Kritische Prüfung") content = "1. Die Antwort ist unvollständig und nennt zu viele Schritte.";
-		return res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: finish }] }));
+		let lastErr = { status: 404, error: { message: "No endpoints found" } };
+		for (const m of list) {
+			if (!FREE_SET.includes(m)) { lastErr = { status: 400, error: { message: `${m} not allowed in mock` } }; continue; }
+			const down = (userText.includes("MODEL_DOWN") && m === FREE_A) || (role === "SEO" && userText.includes("FAIL_ROLE")) || userText.includes("ALLFAIL");
+			if (down) { lastErr = { status: 503, error: { message: "Provider down", metadata: { provider_name: "MockProv" } } }; continue; }
+			if (userText.includes("UPSTREAM429") && [FREE_A, FREE_B, FREE_CODER].includes(m)) {
+				lastErr = { status: 429, error: { code: 429, message: `${m} is temporarily rate-limited upstream`, metadata: { provider_name: "MockProv", raw: "busy" } } };
+				continue;
+			}
+			if (userText.includes("EMPTY") && m === FREE_R1) {
+				return res.end(JSON.stringify({ model: m, choices: [{ message: { content: "" }, finish_reason: "length" }] }));
+			}
+			let content = `MOCK-ANTWORT von ${role}: ${userText.slice(0, 40)}${user.includes("Kontext:") ? " [mit Kontext]" : ""}${user.includes("Projektkontext") ? " [Projektkontext]" : ""}${user.includes("Farben: Grün/Weiß") ? " [Entscheidung bekannt]" : ""}`;
+			let finish = "stop";
+			if (role === "KI-Koordination" && user.includes("AUSSCHLIESSLICH mit JSON")) content = 'Hier: {"roles":["Marketing","SEO","gibtsnicht"],"reason":"Marketingthema"}';
+			if (userText.includes("TRUNCATE") && role !== "Kritische Prüfung") {
+				content = "Hier die Schritte:\n1. Ziel klären\n2. Aufgaben sammeln\n3. Zeitplan\n4. Budget\n5. Start und dann weiter mit";
+				finish = "length";
+			}
+			if (role === "Kritische Prüfung") content = "1. Die Antwort ist unvollständig und nennt zu viele Schritte.";
+			return res.end(JSON.stringify({ model: m, choices: [{ message: { content }, finish_reason: finish }] }));
+		}
+		res.statusCode = lastErr.status;
+		return res.end(JSON.stringify({ error: lastErr.error }));
 	}
 	res.statusCode = 404; res.end("{}");
 });
@@ -324,7 +353,9 @@ try {
 
 	let t = await callTool("ki_team_status");
 	check("ki_team_status", !t.isError && t.text.includes("erreichbar: ja") && t.text.includes("26 Rollen") && t.text.includes("MCP-Server 3.0.0"), t.text);
-	check("Status zeigt nur kostenlose Modelle (4) und Routing", t.text.includes("Kostenlose Modelle: 4") && /code 1/.test(t.text) && /reasoning 1/.test(t.text), t.text);
+	check("Status zeigt nur kostenlose Modelle (6) und Routing", t.text.includes("Kostenlose Modelle: 6") && /code 1/.test(t.text) && /reasoning 1/.test(t.text), t.text);
+	check("Status nennt Fallback-Grenzen (3 Modelle, 2 Anfragen, Preis 0)", t.text.includes("bis zu 3 Modelle je Anfrage, höchstens 2 Anfragen je Auftrag"), t.text);
+	check("Hauptworker 3.1.0", t.text.includes("Version 3.1.0"), t.text);
 	t = await callTool("ki_team_list_roles");
 	check("ki_team_list_roles liefert 26 Rollen", !t.isError && t.text.startsWith("26 Rollen") && t.text.includes("KI-Koordination"), t.text.slice(0, 200));
 
@@ -352,8 +383,10 @@ try {
 	check("Modell-Routing: Programmierung → Code-Modell", t.text.includes(`Modell: ${FREE_CODER} · Profil: code`), t.text);
 	check("Modell-Routing: Sicherheit → Reasoning-Modell", t.text.includes(`Modell: ${FREE_R1} · Profil: reasoning`), t.text);
 
+	let orBefore = orRequests.length;
 	t = await callTool("ki_team_collaborate", { task: "FAIL_ROLE Kampagne", roles: ["Marketing", "SEO"], mode: "sequential" });
-	remaining -= 3;
+	remaining -= 2; // SEO ist gescheitert -> dieser Aufruf wird zurückerstattet
+	check("Gescheiterte Rolle: höchstens 2 OpenRouter-Anfragen (Marketing 1 + SEO 2 + Zusammenfassung 1)", orRequests.length - orBefore === 4, `(${orRequests.length - orBefore})`);
 	check("ki_team_collaborate sequenziell, Teilfehler wird gemeldet", !t.isError && t.text.includes("model_unavailable") && t.text.includes("MOCK-ANTWORT von Marketing") && t.text.includes("[mit Kontext]") && t.text.includes(rem()), t.text);
 
 	console.log("8c) Datenschutz vor Weitergabe an externe Modelle");
@@ -428,6 +461,27 @@ try {
 	t = await callTool("ki_team_usage");
 	check("ki_team_usage zeigt beide Limits, Cache und Nachprüfungen", !t.isError && t.text.includes(rem()) && /Hauptworker-Limit: \d+\/100 genutzt/.test(t.text) && /Cache beantwortet \(0 Aufrufe\): [1-9]/.test(t.text) && t.text.includes("Nachprüfungen: 1"), t.text);
 
+	console.log("8h) Fehlversuche: Rückerstattung gedeckelt, Anfragen begrenzt");
+	let mainBefore = (await callTool("ki_team_usage")).text.match(/Hauptworker-Limit: (\d+)\//)?.[1];
+	for (let i = 1; i <= 4; i++) {
+		orBefore = orRequests.length;
+		t = await callTool("ki_team_run_role", { role: "Marketing", task: "ALLFAIL Versuch" });
+		check(`Fehlversuch ${i}: Fehlermeldung, genau 2 OpenRouter-Anfragen, Kontingent zurückerstattet`, t.isError && t.text.includes("model_unavailable") && orRequests.length - orBefore === 2, `(${orRequests.length - orBefore}) ${t.text}`);
+	}
+	t = await callTool("ki_team_usage");
+	check("Nach 5 Fehlschlägen (1 aus Teamarbeit + 4) ist das MCP-Kontingent unverändert", t.text.includes(rem()), t.text);
+	check("Rückerstattungen werden gezählt: 5/5", t.text.includes("Zurückerstattete Fehlschläge heute: 5/5"), t.text);
+	const mainAfter = t.text.match(/Hauptworker-Limit: (\d+)\//)?.[1];
+	check("Hauptworker zählt jeden Fehlversuch trotzdem (harte Obergrenze)", Number(mainAfter) - Number(mainBefore) === 4, `${mainBefore} -> ${mainAfter}`);
+	orBefore = orRequests.length;
+	t = await callTool("ki_team_run_role", { role: "Marketing", task: "ALLFAIL Versuch" });
+	remaining -= 1;
+	check("6. Fehlschlag wird NICHT mehr zurückerstattet", t.isError && orRequests.length - orBefore === 2, t.text);
+	t = await callTool("ki_team_usage");
+	check("Kontingent nach 6. Fehlschlag um 1 gesunken", t.text.includes(rem()), t.text);
+	t = await callTool("ki_team_status");
+	check("Status zeigt Fehlerprotokoll und pausierte Modelle", t.text.includes("Letzte Fehlschläge:") && t.text.includes("fehler") && t.text.includes("Pausiert"), t.text);
+
 	console.log("9) Atomares Limit bei parallelen Aufrufen");
 	const n = remaining + 3;
 	const par = await Promise.all(Array.from({ length: n }, (_, i) => callTool("ki_team_run_role", { role: "Recherche", task: `parallel ${i}` })));
@@ -447,7 +501,7 @@ try {
 	console.log("11) Hauptworker direkt (Weboberfläche + Schutz der internen API)");
 	await stopWrangler();
 	const UI = "http://127.0.0.1:8789";
-	startWrangler(["-c", "test/main-worker.wrangler.jsonc", "--port", "8789", "--ip", "127.0.0.1", "--var", "DAILY_REQUEST_LIMIT:3", "--persist-to", ".wrangler/ui-state"]);
+	startWrangler(["-c", "test/main-worker.wrangler.jsonc", "--port", "8789", "--ip", "127.0.0.1", "--var", "DAILY_REQUEST_LIMIT:7", "--persist-to", ".wrangler/ui-state"]);
 	await waitReady(UI);
 	r = await fetch(`${UI}/`);
 	check("Weboberfläche lädt", (await r.text()).includes("26 Agenten"));
@@ -477,23 +531,66 @@ try {
 	}
 	r = await fetch(`${UI}/api/mcp/v1/run`, { method: "POST", headers: { "x-workspace-password": "falsch", "content-type": "application/json" }, body: JSON.stringify({ roleId: "SEO", task: "x" }) });
 	check("/api/mcp/v1/run mit falschem Passwort → 401", r.status === 401, `(war ${r.status})`);
-	r = await chat("test-workspace-pw", "Hallo Team");
-	let d = await r.json();
-	check("/api/chat liefert Antwort", r.ok && d.answer?.includes("MOCK-ANTWORT von Marketing"), JSON.stringify(d));
-	r = await chat("test-workspace-pw", "MODEL_DOWN bitte");
-	d = await r.json();
-	check("Fallback auf zweites Free-Modell", r.ok && d.model === FREE_B, JSON.stringify(d));
-	r = await chat("test-workspace-pw", "dritte");
-	check("3. Anfrage erlaubt", r.ok);
-	r = await chat("test-workspace-pw", "vierte");
-	check("Tageslimit des Hauptworkers greift (429)", r.status === 429, `(war ${r.status})`);
+	const uiStart = orRequests.length;
+	const reqs = async (fn) => { const b4 = orRequests.length; const out = await fn(); return { out, n: orRequests.length - b4, list: orRequests.slice(b4) }; };
+	let x = await reqs(() => chat("test-workspace-pw", "Hallo Team"));
+	let d = await x.out.json();
+	check("/api/chat liefert Antwort (1 Anfrage)", x.out.ok && d.answer?.includes("MOCK-ANTWORT von Marketing") && x.n === 1, JSON.stringify(d));
+	check("Fallback-Liste: höchstens 3 Free-Modelle je Anfrage", x.list[0].list.length === 3 && x.list[0].list.every((m) => FREE_SET.includes(m)), JSON.stringify(x.list[0].list));
+	x = await reqs(() => chat("test-workspace-pw", "MODEL_DOWN bitte"));
+	d = await x.out.json();
+	check("Ausfall von Modell 1 → OpenRouter nimmt Modell 2 in derselben Anfrage", x.out.ok && d.model === FREE_B && x.n === 1, JSON.stringify(d));
+	x = await reqs(() => chat("test-workspace-pw", "UPSTREAM429 test"));
+	d = await x.out.json();
+	check("Überlastete Anbieter (429) → nächste Modellgruppe statt Abbruch", x.out.ok && d.model === FREE_R1 && x.n === 2, `${x.n} ${JSON.stringify(d)}`);
+	x = await reqs(() => chat("test-workspace-pw", "ALLFAIL test"));
+	d = await x.out.json();
+	check("Alle Modelle scheitern → Fehler nach genau 2 Anfragen (6 Modelle)", x.out.status === 503 && x.n === 2 && new Set(x.list.flatMap((q) => q.list)).size === 6, `${x.out.status} ${x.n} ${JSON.stringify(d)}`);
+	x = await reqs(() => chat("test-workspace-pw", "Gesundheit"));
+	d = await x.out.json();
+	check("Modell-Gedächtnis: zuletzt erfolgreiches Modell zuerst, mehrfach gescheiterte pausiert", x.out.ok && x.list[0].list[0] === FREE_R1 && ![FREE_A, FREE_B, FREE_CODER].some((m) => x.list[0].list.includes(m)), JSON.stringify(x.list[0].list));
+	x = await reqs(() => chat("test-workspace-pw", "EMPTY test"));
+	d = await x.out.json();
+	check("Leere Antwort gilt als Fehlschlag → nächste Gruppe liefert Text", x.out.ok && x.n === 2 && d.model !== FREE_R1 && d.answer?.includes("MOCK-ANTWORT"), `${x.n} ${JSON.stringify(d)}`);
+	x = await reqs(() => chat("test-workspace-pw", "ALLFAIL zwei"));
+	check("Erneuter Totalausfall: wieder genau 2 Anfragen", x.out.status === 503 && x.n === 2, `${x.n}`);
+	x = await reqs(() => chat("test-workspace-pw", "achte"));
+	check("Tageslimit des Hauptworkers greift (429) ohne OpenRouter-Anfrage", x.out.status === 429 && x.n === 0, `${x.out.status} ${x.n}`);
 	r = await fetch(`${UI}/api/mcp/v1/usage`, { headers: { "x-workspace-password": "test-workspace-pw" } });
 	d = await r.json();
-	check("Nutzung wird korrekt gemeldet", d.used === 3 && d.limit === 3 && d.remaining === 0, JSON.stringify(d));
+	check("Jeder Auftrag (auch gescheiterte) zählt genau 1× im Tageslimit", d.used === 7 && d.limit === 7 && d.remaining === 0, JSON.stringify(d));
+	const uiReqs = orRequests.length - uiStart;
+	check(`Obergrenze: ${uiReqs} OpenRouter-Anfragen für 7 Aufträge (max. 2 je Auftrag = 14)`, uiReqs <= 14 && uiReqs === 11, `${uiReqs}`);
+	r = await fetch(`${UI}/api/mcp/v1/models`, { headers: { "x-workspace-password": "test-workspace-pw" } });
+	const mInfo = await r.json();
+	const mText = JSON.stringify(mInfo);
+	check("/models: Fehlerprotokoll und Gesundheit ohne Inhalte/Secrets", Array.isArray(mInfo.recent) && mInfo.recent.length > 0 && mInfo.free === 6 && !mText.includes("test-or-key") && !mText.includes("ALLFAIL") && !mText.includes("test-workspace-pw"), mText.slice(0, 400));
+
+	console.log("11b) OpenRouter-Tageslimit: Sperre bis Mitternacht, keine weiteren Anfragen");
+	await stopWrangler();
+	startWrangler(["-c", "test/main-worker.wrangler.jsonc", "--port", "8789", "--ip", "127.0.0.1", "--var", "DAILY_REQUEST_LIMIT:5", "--persist-to", ".wrangler/block-state"]);
+	await waitReady(UI);
+	x = await reqs(() => chat("test-workspace-pw", "DAILYLIMIT bitte"));
+	d = await x.out.json();
+	check("OpenRouter-Tageslimit erkannt → 429 mit klarer Meldung", x.out.status === 429 && /Tageslimit/.test(d.error ?? "") && x.n === 1, `${x.out.status} ${JSON.stringify(d)}`);
+	x = await reqs(() => chat("test-workspace-pw", "danach normal"));
+	check("Gesperrt: keine weitere OpenRouter-Anfrage", x.out.status === 429 && x.n === 0, `${x.out.status} ${x.n}`);
+	x = await reqs(() => fetch(`${UI}/api/mcp/v1/run`, { method: "POST", headers: { "x-workspace-password": "test-workspace-pw", "content-type": "application/json" }, body: JSON.stringify({ roleId: "SEO", task: "auch gesperrt" }) }));
+	d = await x.out.json();
+	check("Gesperrt auch für MCP-Aufträge (Code openrouter_daily_limit)", x.out.status === 429 && d.error?.code === "openrouter_daily_limit" && x.n === 0, JSON.stringify(d));
+	r = await fetch(`${UI}/api/mcp/v1/usage`, { headers: { "x-workspace-password": "test-workspace-pw" } });
+	d = await r.json();
+	check("Gesperrte Aufträge verbrauchen kein Tageslimit", d.used === 1, JSON.stringify(d));
+	r = await fetch(`${UI}/api/mcp/v1/models`, { headers: { "x-workspace-password": "test-workspace-pw" } });
+	d = await r.json();
+	check("/models meldet Sperre bis Mitternacht UTC", typeof d.blockedUntil === "string" && d.blockedUntil.endsWith("T00:00:00.000Z"), JSON.stringify(d.blockedUntil));
 
 	console.log("12) Kostenschutz");
-	check("Nur :free-Modelle mit Preis 0 wurden aufgerufen", modelCalls.length > 0 && modelCalls.every((m) => [FREE_A, FREE_B, FREE_CODER, FREE_R1].includes(m)), JSON.stringify([...new Set(modelCalls)]));
-	check("Kostenpflichtige / falsch markierte Modelle nie benutzt (auch nicht beim Routing)", !["paid/expensive", "trap/fake:free", "trap/super-coder:free", "paid/qwen-coder-pro"].some((m) => modelCalls.includes(m)));
+	check(`Nur :free-Modelle mit Preis 0 in allen ${orRequests.length} Anfragen/Fallback-Listen`, modelCalls.length > 0 && modelCalls.every((m) => FREE_SET.includes(m)), JSON.stringify([...new Set(modelCalls)]));
+	check("Kostenpflichtige / falsch markierte / preislose Modelle nie in einer Fallback-Liste", !["paid/expensive", "trap/fake:free", "trap/super-coder:free", "paid/qwen-coder-pro", "trap/nopricing:free"].some((m) => modelCalls.includes(m)));
+	const cap = (q) => q.provider?.max_price && ["prompt", "completion", "request", "image"].every((k) => q.provider.max_price[k] === 0);
+	check("Jede Anfrage enthält die Preisobergrenze 0 (provider.max_price)", orRequests.length > 0 && orRequests.every(cap), JSON.stringify(orRequests.find((q) => !cap(q))));
+	check("Kein Einzelmodell-Feld, jede Fallback-Liste mit 1–3 Modellen", orRequests.every((q) => q.model === undefined && q.list.length >= 1 && q.list.length <= 3));
 
 	await finish(failures.length ? 1 : 0);
 } catch (e) {
