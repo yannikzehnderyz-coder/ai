@@ -337,7 +337,7 @@ try {
 
 	const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } });
 	check("MCP initialize", init.status === 200 && !!init.msg?.result?.serverInfo, `(${init.status} ${init.text?.slice(0, 300)})`);
-	check("Server-Version 3.0.0", init.msg?.result?.serverInfo?.version === "3.0.0", JSON.stringify(init.msg?.result?.serverInfo));
+	check("Server-Version 3.1.0", init.msg?.result?.serverInfo?.version === "3.1.0", JSON.stringify(init.msg?.result?.serverInfo));
 	await rpc("notifications/initialized", {}, true);
 	const list = await rpc("tools/list", {});
 	const names = (list.msg?.result?.tools ?? []).map((t) => t.name).sort();
@@ -352,7 +352,7 @@ try {
 	const rem = () => `${remaining}/${LIMIT}`;
 
 	let t = await callTool("ki_team_status");
-	check("ki_team_status", !t.isError && t.text.includes("erreichbar: ja") && t.text.includes("26 Rollen") && t.text.includes("MCP-Server 3.0.0"), t.text);
+	check("ki_team_status", !t.isError && t.text.includes("erreichbar: ja") && t.text.includes("26 Rollen") && t.text.includes("MCP-Server 3.1.0"), t.text);
 	check("Status zeigt nur kostenlose Modelle (6) und Routing", t.text.includes("Kostenlose Modelle: 6") && /code 1/.test(t.text) && /reasoning 1/.test(t.text), t.text);
 	check("Status nennt Fallback-Grenzen (3 Modelle, 2 Anfragen, Preis 0)", t.text.includes("bis zu 3 Modelle je Anfrage, höchstens 2 Anfragen je Auftrag"), t.text);
 	check("Hauptworker 3.1.0", t.text.includes("Version 3.1.0"), t.text);
@@ -568,20 +568,22 @@ try {
 
 	console.log("11b) OpenRouter-Tageslimit: Sperre bis Mitternacht, keine weiteren Anfragen");
 	await stopWrangler();
-	startWrangler(["-c", "test/main-worker.wrangler.jsonc", "--port", "8789", "--ip", "127.0.0.1", "--var", "DAILY_REQUEST_LIMIT:5", "--persist-to", ".wrangler/block-state"]);
-	await waitReady(UI);
-	x = await reqs(() => chat("test-workspace-pw", "DAILYLIMIT bitte"));
+	const BLK = "http://127.0.0.1:8792";
+	startWrangler(["-c", "test/main-worker.wrangler.jsonc", "--port", "8792", "--ip", "127.0.0.1", "--var", "DAILY_REQUEST_LIMIT:5", "--persist-to", ".wrangler/block-state"]);
+	await waitReady(BLK);
+	const chatB = (task) => fetch(`${BLK}/api/chat`, { method: "POST", headers: { "content-type": "application/json", "x-workspace-password": "test-workspace-pw" }, body: JSON.stringify({ role: "Marketing", task }) });
+	x = await reqs(() => chatB("DAILYLIMIT bitte"));
 	d = await x.out.json();
 	check("OpenRouter-Tageslimit erkannt → 429 mit klarer Meldung", x.out.status === 429 && /Tageslimit/.test(d.error ?? "") && x.n === 1, `${x.out.status} ${JSON.stringify(d)}`);
-	x = await reqs(() => chat("test-workspace-pw", "danach normal"));
+	x = await reqs(() => chatB("danach normal"));
 	check("Gesperrt: keine weitere OpenRouter-Anfrage", x.out.status === 429 && x.n === 0, `${x.out.status} ${x.n}`);
-	x = await reqs(() => fetch(`${UI}/api/mcp/v1/run`, { method: "POST", headers: { "x-workspace-password": "test-workspace-pw", "content-type": "application/json" }, body: JSON.stringify({ roleId: "SEO", task: "auch gesperrt" }) }));
+	x = await reqs(() => fetch(`${BLK}/api/mcp/v1/run`, { method: "POST", headers: { "x-workspace-password": "test-workspace-pw", "content-type": "application/json" }, body: JSON.stringify({ roleId: "SEO", task: "auch gesperrt" }) }));
 	d = await x.out.json();
 	check("Gesperrt auch für MCP-Aufträge (Code openrouter_daily_limit)", x.out.status === 429 && d.error?.code === "openrouter_daily_limit" && x.n === 0, JSON.stringify(d));
-	r = await fetch(`${UI}/api/mcp/v1/usage`, { headers: { "x-workspace-password": "test-workspace-pw" } });
+	r = await fetch(`${BLK}/api/mcp/v1/usage`, { headers: { "x-workspace-password": "test-workspace-pw" } });
 	d = await r.json();
 	check("Gesperrte Aufträge verbrauchen kein Tageslimit", d.used === 1, JSON.stringify(d));
-	r = await fetch(`${UI}/api/mcp/v1/models`, { headers: { "x-workspace-password": "test-workspace-pw" } });
+	r = await fetch(`${BLK}/api/mcp/v1/models`, { headers: { "x-workspace-password": "test-workspace-pw" } });
 	d = await r.json();
 	check("/models meldet Sperre bis Mitternacht UTC", typeof d.blockedUntil === "string" && d.blockedUntil.endsWith("T00:00:00.000Z"), JSON.stringify(d.blockedUntil));
 
