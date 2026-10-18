@@ -1,13 +1,12 @@
 # KI-Team MCP – Prüfbericht
-Commit: 5eb98bbdb95463ab256609b310993d5bc82c11cb · Ref: 3/merge · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/38897034016
+Commit: 841745caa62bfc1f54d1513c20d947e0fcb3f5fb · Ref: ki-team-routing-fix · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/39166604416
 
 | Schritt | Ergebnis |
 |---|---|
 | Installation | success |
 | TypeScript | success |
 | Bundle (dry-run) | success |
-| Hauptworker-Bundle (dry-run) | success |
-| End-to-End-Test | success |
+| End-to-End-Test | failure |
 
 ## install
 ```
@@ -24,7 +23,7 @@ added 223 packages in 6s
 
  ⛅️ wrangler 4.151.0
 ────────────────────
-Total Upload: 2643.80 KiB / gzip: 480.57 KiB
+Total Upload: 2645.93 KiB / gzip: 481.19 KiB
 Your Worker has access to the following bindings:
 Binding                                                                      Resource                  
 env.MCP_OBJECT (MyMCP)                                                       Durable Object            
@@ -41,21 +40,6 @@ env.VERIFY_ROLE ("Kritische Prüfung")                                        En
 env.QUALITY_RESERVE ("4")                                                    Environment Variable      
 env.CACHE_TTL_MINUTES ("360")                                                Environment Variable      
 env.ALLOWED_REVIEW_OWNERS ("yannikzehnderyz-coder")                          Environment Variable      
-
---dry-run: exiting now.
-```
-
-## build-main
-```
-
-added 40 packages in 2s
-
- ⛅️ wrangler 4.151.1
-────────────────────
-Total Upload: 12.78 KiB / gzip: 4.73 KiB
-Your Worker has access to the following bindings:
-Binding                                               Resource          
-env.LIMITS_KV (e9bfead1afcf47eea88d640cd684a644)      KV Namespace      
 
 --dry-run: exiting now.
 ```
@@ -97,12 +81,17 @@ wrangler dev läuft.
   ✔ Refresh-Token wird ausgestellt
 8) MCP
   ✔ MCP initialize
-  ✔ Server-Version 3.0.0
+  ✘ Server-Version 3.0.0 {"name":"Mein KI-Team","version":"3.1.0"}
   ✔ Alle 6 bisherigen Tools weiterhin vorhanden
   ✔ 6 neue Tools vorhanden (12 gesamt)
   ✔ Demo-Tool 'add' entfernt
-  ✔ ki_team_status
-  ✔ Status zeigt nur kostenlose Modelle (4) und Routing
+  ✘ ki_team_status KI-Team erreichbar: ja · 26 Rollen · Version 3.1.0 · MCP-Server 3.1.0
+Kostenlose Modelle: 6 · Routing-Profile: code 1, reasoning 1, writing 0, fast 0, long 3
+Fallback: bis zu 3 Modelle je Anfrage, höchstens 2 Anfragen je Auftrag (nur Preis 0).
+Verbleibende KI-Aufrufe heute (MCP): 40/40 – Reset 2026-10-19T00:00:00.000Z (UTC).
+  ✔ Status zeigt nur kostenlose Modelle (6) und Routing
+  ✔ Status nennt Fallback-Grenzen (3 Modelle, 2 Anfragen, Preis 0)
+  ✔ Hauptworker 3.1.0
   ✔ ki_team_list_roles liefert 26 Rollen
 8a) Einzelauftrag, Cache, Qualitätsprüfung
   ✔ ki_team_run_role erreicht Hauptworker + OpenRouter
@@ -115,6 +104,7 @@ wrangler dev läuft.
   ✔ ki_team_collaborate parallel + Zusammenfassung
   ✔ Modell-Routing: Programmierung → Code-Modell
   ✔ Modell-Routing: Sicherheit → Reasoning-Modell
+  ✔ Gescheiterte Rolle: höchstens 2 OpenRouter-Anfragen (Marketing 1 + SEO 2 + Zusammenfassung 1)
   ✔ ki_team_collaborate sequenziell, Teilfehler wird gemeldet
 8c) Datenschutz vor Weitergabe an externe Modelle
   ✔ Zugangsdaten werden blockiert (0 Aufrufe)
@@ -149,6 +139,17 @@ wrangler dev läuft.
   ✔ PR von GitHub laden: SQL-Injection + XSS + fehlende Tests
   ✔ Nicht freigegebener Besitzer wird abgelehnt
   ✔ ki_team_usage zeigt beide Limits, Cache und Nachprüfungen
+8h) Fehlversuche: Rückerstattung gedeckelt, Anfragen begrenzt
+  ✔ Fehlversuch 1: Fehlermeldung, genau 2 OpenRouter-Anfragen, Kontingent zurückerstattet
+  ✔ Fehlversuch 2: Fehlermeldung, genau 2 OpenRouter-Anfragen, Kontingent zurückerstattet
+  ✔ Fehlversuch 3: Fehlermeldung, genau 2 OpenRouter-Anfragen, Kontingent zurückerstattet
+  ✔ Fehlversuch 4: Fehlermeldung, genau 2 OpenRouter-Anfragen, Kontingent zurückerstattet
+  ✔ Nach 5 Fehlschlägen (1 aus Teamarbeit + 4) ist das MCP-Kontingent unverändert
+  ✔ Rückerstattungen werden gezählt: 5/5
+  ✔ Hauptworker zählt jeden Fehlversuch trotzdem (harte Obergrenze)
+  ✔ 6. Fehlschlag wird NICHT mehr zurückerstattet
+  ✔ Kontingent nach 6. Fehlschlag um 1 gesunken
+  ✔ Status zeigt Fehlerprotokoll und pausierte Modelle
 9) Atomares Limit bei parallelen Aufrufen
   ✔ Genau 18 von 21 parallelen Aufrufen erlaubt
   ✔ Nach Erreichen des Limits → abgelehnt
@@ -170,14 +171,38 @@ wrangler dev läuft.
   ✔ /api/mcp/v1/usage ohne Passwort → 401
   ✔ /api/mcp/v1/health ohne Passwort → 401
   ✔ /api/mcp/v1/run mit falschem Passwort → 401
-  ✔ /api/chat liefert Antwort
-  ✔ Fallback auf zweites Free-Modell
-  ✔ 3. Anfrage erlaubt
-  ✔ Tageslimit des Hauptworkers greift (429)
-  ✔ Nutzung wird korrekt gemeldet
+  ✔ /api/chat liefert Antwort (1 Anfrage)
+  ✔ Fallback-Liste: höchstens 3 Free-Modelle je Anfrage
+  ✔ Ausfall von Modell 1 → OpenRouter nimmt Modell 2 in derselben Anfrage
+  ✔ Überlastete Anbieter (429) → nächste Modellgruppe statt Abbruch
+  ✔ Alle Modelle scheitern → Fehler nach genau 2 Anfragen (6 Modelle)
+  ✔ Modell-Gedächtnis: zuletzt erfolgreiches Modell zuerst, mehrfach gescheiterte pausiert
+  ✔ Leere Antwort gilt als Fehlschlag → nächste Gruppe liefert Text
+  ✔ Erneuter Totalausfall: wieder genau 2 Anfragen
+  ✔ Tageslimit des Hauptworkers greift (429) ohne OpenRouter-Anfrage
+  ✔ Jeder Auftrag (auch gescheiterte) zählt genau 1× im Tageslimit
+  ✔ Obergrenze: 11 OpenRouter-Anfragen für 7 Aufträge (max. 2 je Auftrag = 14)
+  ✔ /models: Fehlerprotokoll und Gesundheit ohne Inhalte/Secrets
+11b) OpenRouter-Tageslimit: Sperre bis Mitternacht, keine weiteren Anfragen
+  ✘ OpenRouter-Tageslimit erkannt → 429 mit klarer Meldung 429 {"error":"Tageslimit erreicht. Morgen geht es weiter."}
+  ✔ Gesperrt: keine weitere OpenRouter-Anfrage
+  ✘ Gesperrt auch für MCP-Aufträge (Code openrouter_daily_limit) {"error":{"code":"daily_limit","message":"Tageslimit erreicht. Morgen geht es weiter."}}
+  ✘ Gesperrte Aufträge verbrauchen kein Tageslimit {"used":7,"limit":7,"remaining":0,"resetsAt":"2026-10-19T00:00:00.000Z"}
+  ✘ /models meldet Sperre bis Mitternacht UTC null
 12) Kostenschutz
-  ✔ Nur :free-Modelle mit Preis 0 wurden aufgerufen
-  ✔ Kostenpflichtige / falsch markierte Modelle nie benutzt (auch nicht beim Routing)
+  ✔ Nur :free-Modelle mit Preis 0 in allen 62 Anfragen/Fallback-Listen
+  ✔ Kostenpflichtige / falsch markierte / preislose Modelle nie in einer Fallback-Liste
+  ✔ Jede Anfrage enthält die Preisobergrenze 0 (provider.max_price)
+  ✔ Kein Einzelmodell-Feld, jede Fallback-Liste mit 1–3 Modellen
 
-Ergebnis: 95 bestanden, 0 fehlgeschlagen
+Ergebnis: 116 bestanden, 6 fehlgeschlagen
+ - Server-Version 3.0.0 {"name":"Mein KI-Team","version":"3.1.0"}
+ - ki_team_status KI-Team erreichbar: ja · 26 Rollen · Version 3.1.0 · MCP-Server 3.1.0
+Kostenlose Modelle: 6 · Routing-Profile: code 1, reasoning 1, writing 0, fast 0, long 3
+Fallback: bis zu 3 Modelle je Anfrage, höchstens 2 Anfragen je Auftrag (nur Preis 0).
+Verbleibende KI-Aufrufe heute (MCP): 40/40 – Reset 2026-10-19T00:00:00.000Z (UTC).
+ - OpenRouter-Tageslimit erkannt → 429 mit klarer Meldung 429 {"error":"Tageslimit erreicht. Morgen geht es weiter."}
+ - Gesperrt auch für MCP-Aufträge (Code openrouter_daily_limit) {"error":{"code":"daily_limit","message":"Tageslimit erreicht. Morgen geht es weiter."}}
+ - Gesperrte Aufträge verbrauchen kein Tageslimit {"used":7,"limit":7,"remaining":0,"resetsAt":"2026-10-19T00:00:00.000Z"}
+ - /models meldet Sperre bis Mitternacht UTC null
 ```
