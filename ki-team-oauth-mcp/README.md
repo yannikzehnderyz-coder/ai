@@ -62,6 +62,11 @@ pnpm-Workspace-Pfade des Monorepos). Die Vorlage `demos/remote-mcp-server` bleib
   und nur, wenn mehr als `QUALITY_RESERVE` Aufrufe frei sind.
 * **Projektgedächtnis:** SQLite-Durable-Object pro GitHub-Konto, Projekte strikt getrennt,
   nichts wird gelöscht (nur archiviert), Zugangsdaten werden abgewiesen.
+* **Zuverlässigeres Routing (3.1):** OpenRouter probiert pro Anfrage bis zu 3 Free-Modelle selbst
+  (Fallback-Liste), höchstens 2 Anfragen pro Auftrag; Preisobergrenze 0 direkt bei OpenRouter
+  (`provider.max_price`); überlastete Anbieter → nächste Gruppe, echtes OpenRouter-Tageslimit → Sperre
+  bis Mitternacht UTC ohne weitere Anfragen; dauerhaftes Modell-Gedächtnis; leere Antworten = Fehlschlag;
+  Fehlschläge werden bis zu 5×/Tag dem MCP-Kontingent zurückerstattet (Hauptworker zählt sie weiter).
 * **Modell-Routing** (Hauptworker v3): Profile `code`, `reasoning`, `writing`, `fast`, `long`
   nach Rolle oder explizit; ausschließlich `:free`-Modelle mit Preis 0, Fallback auf weitere Free-Modelle.
 * **Kontingentmanager:** Cache für identische Anfragen (0 Aufrufe), Vorab-Reservierung mit Rückgabe,

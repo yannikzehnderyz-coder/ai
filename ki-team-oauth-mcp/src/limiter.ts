@@ -13,7 +13,7 @@ import { DurableObject } from "cloudflare:workers";
  * keine Kosten) – der Limiter "fail-closed": Fehler => kein KI-Aufruf.
  */
 
-export type Bucket = "ai" | "register" | "cache_hit" | "verify";
+export type Bucket = "ai" | "register" | "cache_hit" | "verify" | "fail_refund";
 
 export interface ReserveResult {
 	ok: boolean;

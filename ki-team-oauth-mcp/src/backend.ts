@@ -45,6 +45,11 @@ export interface ModelInfo {
 	free: number;
 	profiles?: Record<string, string[]>;
 	version?: string;
+	reliable?: string[];
+	cooling?: string[];
+	recent?: { t: string; profile?: string; kind: string; status?: number; models?: string[] }[];
+	blockedUntil?: string | null;
+	limits?: { modelsPerRequest?: number; maxRequests?: number };
 }
 
 export class BackendError extends Error {
