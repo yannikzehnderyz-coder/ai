@@ -1,5 +1,5 @@
 # KI-Team MCP – Prüfbericht
-Commit: 5a6a962da2ac411f757e2501739cdc5dbbe1a7b5 · Ref: ki-team-routing-fix · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/39166673941
+Commit: f5fc5e10b0f2c9bea83bac2a75e3fd4d695a958e · Ref: 4/merge · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/39166762283
 
 | Schritt | Ergebnis |
 |---|---|
@@ -11,7 +11,7 @@ Commit: 5a6a962da2ac411f757e2501739cdc5dbbe1a7b5 · Ref: ki-team-routing-fix · 
 ## install
 ```
 
-added 223 packages in 6s
+added 223 packages in 7s
 ```
 
 ## typecheck
