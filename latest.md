@@ -1,12 +1,12 @@
 # KI-Team MCP – Prüfbericht
-Commit: 841745caa62bfc1f54d1513c20d947e0fcb3f5fb · Ref: ki-team-routing-fix · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/39166604416
+Commit: 5a6a962da2ac411f757e2501739cdc5dbbe1a7b5 · Ref: ki-team-routing-fix · Lauf: https://github.com/yannikzehnderyz-coder/ai/actions/runs/39166673941
 
 | Schritt | Ergebnis |
 |---|---|
 | Installation | success |
 | TypeScript | success |
 | Bundle (dry-run) | success |
-| End-to-End-Test | failure |
+| End-to-End-Test | success |
 
 ## install
 ```
@@ -81,14 +81,11 @@ wrangler dev läuft.
   ✔ Refresh-Token wird ausgestellt
 8) MCP
   ✔ MCP initialize
-  ✘ Server-Version 3.0.0 {"name":"Mein KI-Team","version":"3.1.0"}
+  ✔ Server-Version 3.1.0
   ✔ Alle 6 bisherigen Tools weiterhin vorhanden
   ✔ 6 neue Tools vorhanden (12 gesamt)
   ✔ Demo-Tool 'add' entfernt
-  ✘ ki_team_status KI-Team erreichbar: ja · 26 Rollen · Version 3.1.0 · MCP-Server 3.1.0
-Kostenlose Modelle: 6 · Routing-Profile: code 1, reasoning 1, writing 0, fast 0, long 3
-Fallback: bis zu 3 Modelle je Anfrage, höchstens 2 Anfragen je Auftrag (nur Preis 0).
-Verbleibende KI-Aufrufe heute (MCP): 40/40 – Reset 2026-10-19T00:00:00.000Z (UTC).
+  ✔ ki_team_status
   ✔ Status zeigt nur kostenlose Modelle (6) und Routing
   ✔ Status nennt Fallback-Grenzen (3 Modelle, 2 Anfragen, Preis 0)
   ✔ Hauptworker 3.1.0
@@ -184,25 +181,16 @@ Verbleibende KI-Aufrufe heute (MCP): 40/40 – Reset 2026-10-19T00:00:00.000Z (U
   ✔ Obergrenze: 11 OpenRouter-Anfragen für 7 Aufträge (max. 2 je Auftrag = 14)
   ✔ /models: Fehlerprotokoll und Gesundheit ohne Inhalte/Secrets
 11b) OpenRouter-Tageslimit: Sperre bis Mitternacht, keine weiteren Anfragen
-  ✘ OpenRouter-Tageslimit erkannt → 429 mit klarer Meldung 429 {"error":"Tageslimit erreicht. Morgen geht es weiter."}
+  ✔ OpenRouter-Tageslimit erkannt → 429 mit klarer Meldung
   ✔ Gesperrt: keine weitere OpenRouter-Anfrage
-  ✘ Gesperrt auch für MCP-Aufträge (Code openrouter_daily_limit) {"error":{"code":"daily_limit","message":"Tageslimit erreicht. Morgen geht es weiter."}}
-  ✘ Gesperrte Aufträge verbrauchen kein Tageslimit {"used":7,"limit":7,"remaining":0,"resetsAt":"2026-10-19T00:00:00.000Z"}
-  ✘ /models meldet Sperre bis Mitternacht UTC null
+  ✔ Gesperrt auch für MCP-Aufträge (Code openrouter_daily_limit)
+  ✔ Gesperrte Aufträge verbrauchen kein Tageslimit
+  ✔ /models meldet Sperre bis Mitternacht UTC
 12) Kostenschutz
-  ✔ Nur :free-Modelle mit Preis 0 in allen 62 Anfragen/Fallback-Listen
+  ✔ Nur :free-Modelle mit Preis 0 in allen 63 Anfragen/Fallback-Listen
   ✔ Kostenpflichtige / falsch markierte / preislose Modelle nie in einer Fallback-Liste
   ✔ Jede Anfrage enthält die Preisobergrenze 0 (provider.max_price)
   ✔ Kein Einzelmodell-Feld, jede Fallback-Liste mit 1–3 Modellen
 
-Ergebnis: 116 bestanden, 6 fehlgeschlagen
- - Server-Version 3.0.0 {"name":"Mein KI-Team","version":"3.1.0"}
- - ki_team_status KI-Team erreichbar: ja · 26 Rollen · Version 3.1.0 · MCP-Server 3.1.0
-Kostenlose Modelle: 6 · Routing-Profile: code 1, reasoning 1, writing 0, fast 0, long 3
-Fallback: bis zu 3 Modelle je Anfrage, höchstens 2 Anfragen je Auftrag (nur Preis 0).
-Verbleibende KI-Aufrufe heute (MCP): 40/40 – Reset 2026-10-19T00:00:00.000Z (UTC).
- - OpenRouter-Tageslimit erkannt → 429 mit klarer Meldung 429 {"error":"Tageslimit erreicht. Morgen geht es weiter."}
- - Gesperrt auch für MCP-Aufträge (Code openrouter_daily_limit) {"error":{"code":"daily_limit","message":"Tageslimit erreicht. Morgen geht es weiter."}}
- - Gesperrte Aufträge verbrauchen kein Tageslimit {"used":7,"limit":7,"remaining":0,"resetsAt":"2026-10-19T00:00:00.000Z"}
- - /models meldet Sperre bis Mitternacht UTC null
+Ergebnis: 122 bestanden, 0 fehlgeschlagen
 ```
